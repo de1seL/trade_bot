@@ -90,7 +90,7 @@ CONFIG = {
 
     # ── ADX (4h) — trend gücü ────────────────────────────────
     "adx_period"          : 14,
-    "adx_threshold"       : 20,
+    "adx_threshold"       : 25,          # 20 çok zayıftı; 25 = klasik "güçlü trend" eşiği
 
     # ── Stochastic RSI (1h) ──────────────────────────────────
     "stoch_period"        : 14,
@@ -135,6 +135,10 @@ CONFIG = {
 
     # ── Giriş eşiği ─────────────────────────────────────────
     "min_conditions"      : 3,    # 6 koşuldan kaçı sağlanmalı
+    "require_trigger"     : True, # Skor yetmez: taze bir TETİK (MACD crossover veya
+                                  # StochRSI dönüşü) de şart. Aksi halde uzamış hareketin
+                                  # ortasından/tepesinden giriyorsun (st/obv durum koşulları
+                                  # trend yönünde zaten bedava True oluyor).
 
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,
@@ -521,6 +525,11 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, obv_long,  st_long])
     short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, obv_short, st_short])
 
+    # TETİK = taze zamanlama olayı (durum koşulu değil). Girişi geç/uzamış
+    # hareketten korur. MACD crossover ya da StochRSI momentum dönüşü.
+    long_trigger  = macd_up   or stoch_long
+    short_trigger = macd_down or stoch_short
+
     return {
         "price"       : round(price, 6),
         "atr"         : round(float(last["atr"]), 6),
@@ -546,6 +555,8 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
         "vol_ma"      : float(last["vol_ma"]),
         "long_score"  : long_score,
         "short_score" : short_score,
+        "long_trigger"  : long_trigger,
+        "short_trigger" : short_trigger,
     }
 
 
@@ -590,6 +601,12 @@ def get_signal(trend: dict, entry: dict, daily: str, btc_chg: float = 0.0,
             return "HOLD"
         if d == "SHORT" and btc_chg >=  cfg["btc_pump_threshold"]:
             return "HOLD"
+
+    # ── Taze tetik şartı ─────────────────────────────────────
+    # Skor yetse bile zamanlama tetiği yoksa girme (uzamış hareket koruması).
+    if cfg.get("require_trigger", True):
+        if d == "LONG"  and not entry.get("long_trigger"):  return "HOLD"
+        if d == "SHORT" and not entry.get("short_trigger"): return "HOLD"
 
     if d == "LONG"  and entry["long_score"]  >= min_c: return "LONG"
     if d == "SHORT" and entry["short_score"] >= min_c: return "SHORT"
@@ -1239,9 +1256,13 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
 
     # ── 3. Sinyal hesaplamaları (sadece yeni giriş için gerekli) ──
     try:
-        df1d = fetch_ohlcv(ex, symbol, cfg["daily_tf"],  limit=210)
-        df4h = fetch_ohlcv(ex, symbol, cfg["trend_tf"],  limit=250)
-        df1h = fetch_ohlcv(ex, symbol, cfg["entry_tf"],  limit=300)
+        # Sinyaller SADECE KAPANMIŞ mumlarla hesaplanır. Borsa son eleman olarak
+        # OLUŞMAKTA OLAN (yarım) mumu döner; onu atmazsak indikatörler her 15sn'de
+        # repaint eder (hacim yarım kalır, MACD/StochRSI/SuperTrend sürekli değişir)
+        # ve bot mum kapanınca yok olacak sinyallere girer. iloc[:-1] = son KAPALI mum.
+        df1d = fetch_ohlcv(ex, symbol, cfg["daily_tf"],  limit=260).iloc[:-1].copy()
+        df4h = fetch_ohlcv(ex, symbol, cfg["trend_tf"],  limit=250).iloc[:-1].copy()
+        df1h = fetch_ohlcv(ex, symbol, cfg["entry_tf"],  limit=300).iloc[:-1].copy()
 
         daily  = calc_daily_trend(df1d)
         trend  = calc_trend(df4h)
