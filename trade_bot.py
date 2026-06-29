@@ -502,9 +502,14 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     stoch_short = sk < cfg["stoch_overbought"] and sk < sd2 and sk_falling
 
     rsi_val   = float(last["rsi"])
+    # RSI kendi momentumuna baksın (eskiden sk_rising'e bağlıydı → StochRSI'ın kopyasıydı,
+    # yani 6 koşuldan biri sahteydi). Artık bağımsız bir teyit.
+    rsi_series  = df["rsi"].dropna()
+    rsi_rising  = len(rsi_series) >= 3 and float(rsi_series.iloc[-1]) > float(rsi_series.iloc[-3])
+    rsi_falling = len(rsi_series) >= 3 and float(rsi_series.iloc[-1]) < float(rsi_series.iloc[-3])
     # Trend takip: LONG için RSI yükseliyor ve 45 üstünde, SHORT için düşüyor ve 55 altında
-    rsi_long  = rsi_val > cfg["rsi_oversold"]   and sk_rising
-    rsi_short = rsi_val < cfg["rsi_overbought"] and sk_falling
+    rsi_long  = rsi_val > cfg["rsi_oversold"]   and rsi_rising
+    rsi_short = rsi_val < cfg["rsi_overbought"] and rsi_falling
 
     st_long  = int(last["std"]) == 1
     st_short = int(last["std"]) == -1
@@ -876,7 +881,11 @@ def fetch_live_positions(ex, symbols):
     """Borsadaki açık pozisyonları {symbol: contracts} olarak döner.
     Hata olursa None döner → o döngü dış-kapanış kontrolü atlanır."""
     if CONFIG["dry_run"]:
-        return {}
+        # KRİTİK: dry run'da borsa yok → None dön (boş {} DEĞİL!).
+        # Boş {} dönersek run_symbol her açık pozisyonu "borsada kapanmış" sanıp
+        # bir sonraki döngüde anında kapatır; SL/TP/trailing hiç test edilmez.
+        # Bu yüzden dry run "iyi" görünüyordu ama stratejiyi hiç çalıştırmıyordu.
+        return None
     try:
         raw = ex.fetch_positions(symbols)
     except Exception as e:
@@ -1214,6 +1223,20 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
             # Kapatma başarısız olursa pozisyonu kapatmayı denemeye devam etsin diye pos.active kalır, return
             return
 
+    # ── 2.5 Yeni giriş mümkün değilse AĞIR HESABI ATLA ──────────────
+    # Pozisyon hâlâ açıksa, cooldown'daysa veya max pozisyon dolduysa yeni
+    # giriş olamaz. Bu durumda 1d/4h/1h OHLCV çekmek gereksiz: hem API yükü
+    # hem de döngüyü yavaşlatıp açık pozisyonların trailing/breakeven/zaman
+    # çıkışını CANLIDA geciktiriyor. Erken çık.
+    if pos.active:
+        return
+    if pos.in_cooldown():
+        mins = int((pos.cooldown_until - time.time()) / 60) + 1
+        log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
+        return
+    if count_open(positions) >= cfg["max_positions"]:
+        return
+
     # ── 3. Sinyal hesaplamaları (sadece yeni giriş için gerekli) ──
     try:
         df1d = fetch_ohlcv(ex, symbol, cfg["daily_tf"],  limit=210)
@@ -1236,25 +1259,19 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
 
         log_scan(symbol, trend, entry, signal, pos, daily, trend_1h)
 
-        # Yeni pozisyon açma kararı
-        if not pos.active and signal in ("LONG", "SHORT"):
-            if pos.in_cooldown():
-                mins = int((pos.cooldown_until - time.time()) / 60) + 1
-                log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
-            elif count_open(positions) >= cfg["max_positions"]:
-                log.info(f"🔒 [{symbol}] Max pozisyon doldu")
+        # Yeni pozisyon açma kararı (cooldown/max pozisyon yukarıda 2.5'te elendi)
+        if signal in ("LONG", "SHORT"):
+            amount = calc_amount(ex, symbol, price)
+            if amount is None:
+                pass   # calc_amount sebebini logladı (minimum altı → atla)
             else:
-                amount = calc_amount(ex, symbol, price)
-                if amount is None:
-                    pass   # calc_amount sebebini logladı (minimum altı → atla)
-                else:
-                    pos.open(signal, price, entry["atr"], amount)
-                    ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
-                    if not ok:
-                        # Emir başarısız oldu — pozisyonu hafızadan da kapat
-                        log.warning(f"⚠️  [{symbol}] Emir başarısız, pozisyon hafızadan siliniyor")
-                        pos.active = False
-                        pos.side = None
+                pos.open(signal, price, entry["atr"], amount)
+                ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
+                if not ok:
+                    # Emir başarısız oldu — pozisyonu hafızadan da kapat
+                    log.warning(f"⚠️  [{symbol}] Emir başarısız, pozisyon hafızadan siliniyor")
+                    pos.active = False
+                    pos.side = None
 
     except ccxt.NetworkError as e:
         log.warning(f"🌐 [{symbol}] Ağ: {e}")
