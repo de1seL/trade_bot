@@ -317,20 +317,36 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
     for sym, t in tickers.items():
         if sym not in valid:
             continue
-        vol = t.get("quoteVolume") or 0
-        pct = abs(t.get("percentage") or 0)
+        vol  = t.get("quoteVolume") or 0
+        spct = t.get("percentage") or 0          # işaretli 24s değişim (yön için)
+        pct  = abs(spct)
         if vol < 10_000_000:  # min 10M USDT hacim
             continue
-        rows.append({"symbol": sym, "pct": pct, "vol_m": vol / 1e6, "score": pct * vol})
+        rows.append({"symbol": sym, "pct": pct, "spct": spct, "vol_m": vol / 1e6, "score": pct * vol})
 
     if not rows:
         return FALLBACK
 
     df = pd.DataFrame(rows).sort_values("score", ascending=False).head(top_n)
 
+    # ── Rejim özeti ──────────────────────────────────────────
+    # Tarayıcı en çok HAREKET edeni seçer. Kırmızı günde bunlar düşenlerdir →
+    # bot ağırlıkla SHORT arar (bu bir hata değil, piyasa böyle). Aşağıdaki
+    # özet "neden hep short?" sorusunu gözle doğrulamanı sağlar.
+    ups   = int((df["spct"] > 0).sum())
+    downs = int((df["spct"] < 0).sum())
+    if downs > ups * 2:
+        rejim = "📉 DÜŞÜŞ ağırlıklı → çoğunlukla SHORT beklenir (normal)"
+    elif ups > downs * 2:
+        rejim = "📈 YÜKSELİŞ ağırlıklı → çoğunlukla LONG beklenir"
+    else:
+        rejim = "↔️  karışık → her iki yön de mümkün"
+    log.info(f"🧭 Piyasa rejimi: seçilen {len(df)} coinin {ups}'i ↑ / {downs}'i ↓   {rejim}")
+
     log.info(f"🏆 En volatil {top_n} coin (hepsi taranacak, max {CONFIG['max_positions']} pozisyon açılacak):")
     for _, r in df.iterrows():
-        log.info(f"   {r['symbol']:<28}  %{r['pct']:>5.1f}  {r['vol_m']:>8.1f}M")
+        ok = "↑" if r["spct"] > 0 else "↓"
+        log.info(f"   {r['symbol']:<28}  {ok}%{r['pct']:>5.1f}  {r['vol_m']:>8.1f}M")
     return df["symbol"].tolist()
 
 # ─────────────────────────────────────────────────────────────
