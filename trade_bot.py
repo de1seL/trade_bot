@@ -60,7 +60,10 @@ load_dotenv()
 
 CONFIG = {
     # ── Coinler ─────────────────────────────────────────────
-    "symbols"             : [
+    # symbols BOŞ → bot her saat en likit/volatil coinleri kendi seçer (dinamik tarama).
+    # Sabit listeye dönmek istersen aşağıdaki "symbols_manual"deki coinleri "symbols"e taşı.
+    "symbols"             : [],
+    "symbols_manual"      : [   # yedek/referans — "symbols" boşken KULLANILMAZ
         "BTC/USDT:USDT",  "ETH/USDT:USDT",  "SOL/USDT:USDT",
         "BNB/USDT:USDT",  "XRP/USDT:USDT",  "DOGE/USDT:USDT",
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
@@ -70,7 +73,7 @@ CONFIG = {
         "ARB/USDT:USDT",  "OP/USDT:USDT",   "SUI/USDT:USDT",
         "INJ/USDT:USDT",  "APT/USDT:USDT",  "TIA/USDT:USDT",
     ],
-    "top_volatile_count"  : 50,          # 50 coin tara
+    "top_volatile_count"  : 25,          # 25 coin tara (50 çok ağırdı, döngüyü yavaşlatıyordu)
     "symbol_refresh_sec"  : 3600,        # saatte bir yenile
 
     # ── Kaldıraç ────────────────────────────────────────────
@@ -1314,10 +1317,11 @@ def main():
     log.info("=" * 54)
     log.info("  🤖 Kripto Futures Bot v10.0")
     log.info(f"  Bakiye     : {START_BALANCE:.2f} USDT")
-    log.info(f"  Coinler    : {len(symbols)} coin taranıyor  (max {cfg['max_positions']} pozisyon)")
+    _scan_mode = "sabit liste" if cfg["symbols"] else f"dinamik (saatlik top {cfg['top_volatile_count']})"
+    log.info(f"  Coinler    : {len(symbols)} coin — {_scan_mode}  (max {cfg['max_positions']} pozisyon)")
     log.info(f"  Kaldıraç   : {cfg['leverage']}x")
-    log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.0f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/6 koşul")
+    log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']}")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
     log.info(f"  Günlük Lim : %{cfg['daily_loss_pct']}")
@@ -1332,8 +1336,20 @@ def main():
         setup_symbol(ex, sym, cfg["leverage"])
         time.sleep(0.2)
 
+    # Dinamik taramada mevcut bir pozisyon, o anki tarama listesinde olmayan bir
+    # coinde olabilir. Mutabakatın onu da görebilmesi için referans coinleri ekle
+    # (setup_symbol gerekmez — sadece varsa yüklenip yönetilecek).
+    for sym in cfg.get("symbols_manual", []):
+        positions.setdefault(sym, Position(sym))
+
     # Restart mutabakatı — borsadaki açık pozisyonları yükle (çift pozisyonu önler)
     reconcile_positions(ex, positions)
+
+    # Tarama listesi dışında açık pozisyon bulunduysa onu da yönetime al
+    held = [s for s, p in positions.items() if p.active and s not in symbols]
+    if held:
+        log.info(f"📌 Tarama dışı açık pozisyonlar yönetime alındı: {', '.join(held)}")
+        symbols = symbols + held
 
     while True:
         if pnl_tracker.daily_limit_hit(START_BALANCE):
@@ -1348,7 +1364,12 @@ def main():
                 if s not in positions:
                     positions[s] = Position(s)
                     setup_symbol(ex, s, cfg["leverage"])
-            symbols      = new_syms
+            # GÜVENLİK: açık pozisyonu olan bir coin yeni listede yoksa onu DÜŞÜRME —
+            # yoksa bot o pozisyonu artık taramaz (trailing/breakeven/zaman çıkışı durur).
+            held = [s for s, p in positions.items() if p.active and s not in new_syms]
+            if held:
+                log.info(f"📌 Açık pozisyonlu coinler listede tutuluyor: {', '.join(held)}")
+            symbols      = new_syms + held
             last_refresh = time.time()
 
         # BTC korelasyon filtresi için BTC değişimini al
