@@ -18,20 +18,18 @@
     EMA20 > EMA50 → yukarı momentum (LONG)
     EMA20 < EMA50 → aşağı momentum (SHORT)
 
-  KATMAN 4 — GİRİŞ (1h, 2/6 koşul yeterli)
-    StochRSI aşırı bölge + dönüş
-    RSI aşırı bölge
-    MACD crossover
-    Hacim artışı
-    OBV yönü
-    Süper Trend yönü
+  KATMAN 4 — GİRİŞ (1h, min koşul + ZORUNLU taze tetik)
+    Skor koşulları (5): StochRSI dönüş, RSI momentum, MACD crossover,
+                        Hacim artışı, Süper Trend yönü
+    Tetik (≥1 şart): MACD crossover VEYA StochRSI dönüşü
+    Tüm sinyaller KAPANMIŞ mumdan hesaplanır (repaint yok)
 
 ── ÇIKIŞ ────────────────────────────────────────────────────────
-  SL      : ATR × 1.3  (min %1.2, max %3.0) — 1h gürültüsünün dışında
-  TP      : giriş ± (gerçek SL mesafesi × 2)  → R:R her zaman 1:2
+  SL      : ATR × 1.3  (min %1.2, max %3.0) — 1h gürültüsünün dışında, DARALTILMAZ
+  TP      : giriş ± (gerçek SL mesafesi × 1.5)  → R:R 1:1.5 (ulaşılabilir)
   ROI TP  : +%3.5 kaldıraçlı kâr → direkt kapat (roi_tp_enabled ile aç/kapa, varsayılan KAPALI)
-  Breakeven: %1.5 kârda SL → giriş fiyatına
-  Trailing: %1.2 band, %2.0 kârda devreye girer (breakeven'in üstünde, asla girişin altına inmez)
+  Breakeven: +1R kârda SL → giriş fiyatına (R-bazlı)
+  Trailing: +1R kârda devreye girer, %1.2 band, asla girişin altına inmez
   Zaman   : 4 saat içinde kapanmazsa çık
 
 ── KORUMALAR ─────────────────────────────────────────────────────
@@ -121,17 +119,21 @@ CONFIG = {
     # ── ATR & SL/TP (1h) ─────────────────────────────────────
     "atr_period"          : 14,
     "atr_sl_mult"         : 1.3,         # SL'i 1h gürültüsünün DIŞINA koy (eski 0.8 çok dardı)
-    "rr_ratio"            : 2.0,         # TP = giriş ± rr × gerçek SL mesafesi → R:R her zaman 1:2
+    "rr_ratio"            : 1.5,         # TP = giriş ± 1.5 × gerçek SL mesafesi. 2.0 idi ama
+                                         # fiyat oraya çoğu zaman ulaşamadan dönüyordu; 1.5 daha
+                                         # ulaşılabilir → daha yüksek isabet. SL'e DOKUNMUYORUZ.
     "min_sl_pct"          : 0.012,       # %1.2 min — 5x'te gürültüye stop olmayı önler
     "max_sl_pct"          : 0.030,       # %3.0 max
 
-    # ── Trailing & Breakeven ─────────────────────────────────
+    # ── Trailing & Breakeven (R-bazlı) ───────────────────────
+    # Eşikler artık sabit % değil, işlemin KENDİ risk mesafesine (1R) göre ölçeklenir.
+    # Böylece SL'i %1.2 olan da %3.0 olan da tutarlı yönetilir.
     # Sıra önemli: önce breakeven (giriş kilidi), SONRA trailing devreye girer —
-    # böylece trailing SL'i ASLA girişin altına çekip kazananı zarara çevirmez.
-    "trail_pct"           : 0.012,
-    "trail_min_profit"    : 0.020,       # %2.0 kârda trailing başlar (breakeven'in ÜSTÜNDE)
+    # trailing SL'i ASLA girişin altına çekmez (kazananı zarara çevirmeyi önler).
+    "breakeven_at_r"      : 1.0,         # +1R kârda SL → giriş (kilit)
+    "trail_start_r"       : 1.0,         # +1R kârda trailing başlar
+    "trail_pct"           : 0.012,       # trailing bandı (fiyatın altında %1.2)
     "trail_max_pct"       : 0.025,
-    "breakeven_pct"       : 0.015,       # %1.5 kârda breakeven (≈1R)
 
     # ── Giriş eşiği ─────────────────────────────────────────
     "min_conditions"      : 3,    # 6 koşuldan kaçı sağlanmalı
@@ -467,12 +469,6 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     ).average_true_range()
     df["vol_ma"] = df["volume"].rolling(cfg["vol_period"]).mean()
 
-    # OBV
-    df["obv"]    = ta.volume.OnBalanceVolumeIndicator(
-        df["close"], df["volume"]
-    ).on_balance_volume()
-    df["obv_ma"] = df["obv"].rolling(20).mean()
-
     last  = df.iloc[-1]
     prev  = df.iloc[-2]
     price = float(last["close"])
@@ -481,7 +477,7 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     coin_chg_1h = (price - float(prev["close"])) / float(prev["close"])
 
     # NaN Koruması
-    for col in ["sk","sd","macd","msig","st","atr","vol_ma","obv","obv_ma","rsi"]:
+    for col in ["sk","sd","macd","msig","st","atr","vol_ma","rsi"]:
         if pd.isna(last[col]):
             return None
 
@@ -518,12 +514,11 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     st_long  = int(last["std"]) == 1
     st_short = int(last["std"]) == -1
     vol_ok   = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
-    obv_long  = float(last["obv"]) > float(last["obv_ma"])
-    obv_short = float(last["obv"]) < float(last["obv_ma"])
 
-    # Skor: StochRSI + RSI + MACD + Hacim + OBV + ST (hepsi skorda, zorunlu yok)
-    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, obv_long,  st_long])
-    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, obv_short, st_short])
+    # Skor: StochRSI + RSI + MACD + Hacim + ST (5 koşul; OBV kaldırıldı — perp'te
+    # zayıf/yanıltıcı ve EMA trendiyle zaten örtüşüyordu)
+    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long])
+    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short])
 
     # TETİK = taze zamanlama olayı (durum koşulu değil). Girişi geç/uzamış
     # hareketten korur. MACD crossover ya da StochRSI momentum dönüşü.
@@ -549,8 +544,6 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
         "macd_up"     : macd_up,
         "macd_down"   : macd_down,
         "vol_ok"      : vol_ok,
-        "obv_long"    : obv_long,
-        "obv_short"   : obv_short,
         "volume"      : float(last["volume"]),
         "vol_ma"      : float(last["vol_ma"]),
         "long_score"  : long_score,
@@ -628,6 +621,7 @@ class Position:
         self.peak           = 0.0
         self.valley         = 0.0
         self.amount         = 0.0
+        self.risk_pct       = 0.0   # |giriş - SL| / giriş → R-bazlı çıkış eşikleri için
         self.open_time      = None
         self.cooldown_until = None
 
@@ -663,6 +657,7 @@ class Position:
         self.entry_price = price
         self.open_time   = time.time()
         self.amount      = amount   # caller'dan gelen, borsa precision'ına uygun miktar
+        self.risk_pct    = abs(price - self.stop_loss) / price   # 1R = bu mesafe
 
         sl_pct = abs(price - self.stop_loss)   / price * 100
         tp_pct = abs(price - self.take_profit) / price * 100
@@ -676,10 +671,12 @@ class Position:
 
     def update_trailing(self, price: float) -> bool:
         cfg        = CONFIG
-        min_profit = cfg["trail_min_profit"]
+        # R-bazlı eşikler: işlemin kendi risk mesafesine (1R) göre ölçeklenir.
+        risk       = self.risk_pct if self.risk_pct > 0 else cfg["min_sl_pct"]
+        min_profit = cfg["trail_start_r"]  * risk
+        be_pct     = cfg["breakeven_at_r"] * risk
         base_pct   = cfg["trail_pct"]
         max_pct    = cfg["trail_max_pct"]
-        be_pct     = cfg["breakeven_pct"]
 
         if self.side == "LONG":
             profit = (price - self.entry_price) / self.entry_price
@@ -1109,6 +1106,10 @@ def reconcile_positions(ex, positions: dict):
                     ex.create_order(sym, "TAKE_PROFIT_MARKET", cs, a, params={"stopPrice": _prc(ex, sym, tp), "reduceOnly": True})
                 except Exception as e:
                     log.error(f"🚨 [{sym}] Mutabakat: koruma emri yeniden kurulamadı: {e} — MANUEL kontrol et!")
+
+            # R-bazlı çıkış eşikleri için risk mesafesini hesapla (restart sonrası da doğru çalışsın)
+            if entry_price > 0:
+                pos.risk_pct = abs(entry_price - pos.stop_loss) / entry_price
             found += 1
         except Exception as e:
             log.warning(f"⚠️  Mutabakat: bir pozisyon işlenemedi: {e}")
@@ -1174,10 +1175,10 @@ def log_scan(sym, trend, entry, signal, pos, daily, trend_1h="NONE"):
         f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}\n"
         f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}\n"
         f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}\n"
-        f"  LONG ({entry['long_score']}/6, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} OBV{t(entry['obv_long'])} ST{t(entry['st_long'])}\n"
-        f"  SHORT({entry['short_score']}/6, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} OBV{t(entry['obv_short'])} ST{t(entry['st_short'])}\n"
+        f"  LONG ({entry['long_score']}/5, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
+        f"  SHORT({entry['short_score']}/5, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
