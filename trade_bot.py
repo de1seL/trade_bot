@@ -83,7 +83,7 @@ CONFIG = {
                                          #   (ETH gibi az oynayanlar bu filtreyle zaten çıkar)
 
     # ── Kaldıraç ────────────────────────────────────────────
-    "leverage"            : 5,
+    "leverage"            : 10,
 
     # ── Zaman dilimleri ─────────────────────────────────────
     "daily_tf"            : "1d",
