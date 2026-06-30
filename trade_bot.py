@@ -73,8 +73,14 @@ CONFIG = {
         "ARB/USDT:USDT",  "OP/USDT:USDT",   "SUI/USDT:USDT",
         "INJ/USDT:USDT",  "APT/USDT:USDT",  "TIA/USDT:USDT",
     ],
-    "top_volatile_count"  : 25,          # 25 coin tara (50 çok ağırdı, döngüyü yavaşlatıyordu)
+    "top_volatile_count"  : 50,          # 50 coin tara
     "symbol_refresh_sec"  : 3600,        # saatte bir yenile
+
+    # ── Tarama filtreleri ───────────────────────────────────
+    # Az hareket eden büyük-cap'leri dışla (küçük sermaye + 5x ile kâr çıkmaz).
+    "exclude_bases"       : ["BTC", "BNB"],   # bu coinleri HİÇ tarama (istersen ETH vb. ekle)
+    "min_volatility_pct"  : 4.0,         # 24s |%değişim| < %4 olanları ELE → "gibi" durgunlar
+                                         #   (ETH gibi az oynayanlar bu filtreyle zaten çıkar)
 
     # ── Kaldıraç ────────────────────────────────────────────
     "leverage"            : 5,
@@ -336,7 +342,8 @@ def ensure_leverage(ex: ccxt.Exchange, symbol: str, leverage: int) -> bool:
 # ─────────────────────────────────────────────────────────────
 
 STABLE   = {"USDT","BUSD","USDC","DAI","TUSD","FDUSD","USDP","UST"}
-FALLBACK = ["BTC/USDT:USDT","ETH/USDT:USDT","SOL/USDT:USDT","BNB/USDT:USDT","XRP/USDT:USDT"]
+# Tarama hiç sonuç vermezse yedek liste — BTC/BNB gibi durgunlar dahil DEĞİL (hareketli alt'lar)
+FALLBACK = ["SOL/USDT:USDT","XRP/USDT:USDT","DOGE/USDT:USDT","AVAX/USDT:USDT","LINK/USDT:USDT"]
 
 
 def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
@@ -348,13 +355,16 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         log.error(f"Tarama hatası: {e}")
         return FALLBACK
 
+    exclude = {b.upper() for b in CONFIG.get("exclude_bases", [])}
     valid = {
         m["symbol"] for m in markets.values()
         if m.get("type") == "swap" and m.get("linear")
         and m.get("active") and m.get("quote") == "USDT"
         and m.get("base") not in STABLE
+        and m.get("base") not in exclude          # BTC/BNB gibi dışlananları ele
     }
 
+    min_vol_pct = CONFIG.get("min_volatility_pct", 0.0)
     rows = []
     for sym, t in tickers.items():
         if sym not in valid:
@@ -363,6 +373,8 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         spct = t.get("percentage") or 0          # işaretli 24s değişim (yön için)
         pct  = abs(spct)
         if vol < 10_000_000:  # min 10M USDT hacim
+            continue
+        if pct < min_vol_pct:  # 24s hareketi çok az → durgun coin, ele
             continue
         rows.append({"symbol": sym, "pct": pct, "spct": spct, "vol_m": vol / 1e6, "score": pct * vol})
 
