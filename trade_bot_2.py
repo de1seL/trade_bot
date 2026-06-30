@@ -44,6 +44,10 @@ RSI_MID         = 50     # trend momentum eşiği (osilatör)
 # Decorrelated set daha seçici (her koşul bağımsız), bu yüzden eşiği biraz düşür.
 CONFIG["min_conditions"] = 2     # 4 bağımsız koşuldan en az 2 + zorunlu tetik
 
+# Bu bir DENEY botu → DRY RUN (kağıt üzerinde, gerçek emir YOK, para riski YOK).
+# Ayrı process olduğu için trade_bot.py'yi ETKİLEMEZ; o kendi ayarıyla çalışır.
+CONFIG["dry_run"] = True
+
 
 def calc_entry_v2(df: pd.DataFrame) -> dict | None:
     """trade_bot.calc_entry'nin DECORRELATED karşılığı. get_signal/log_scan'in
