@@ -346,6 +346,34 @@ STABLE   = {"USDT","BUSD","USDC","DAI","TUSD","FDUSD","USDP","UST"}
 FALLBACK = ["SOL/USDT:USDT","XRP/USDT:USDT","DOGE/USDT:USDT","AVAX/USDT:USDT","LINK/USDT:USDT"]
 
 
+def filter_min_leverage(ex, symbols: list[str], min_lev: int) -> list[str]:
+    """Borsada max kaldıracı min_lev (5x) altında olan coinleri listeden çıkarır.
+    Tek bir fetch_leverage_tiers çağrısıyla tüm semboller okunur. dry_run'da veya
+    bilgi alınamazsa dokunmaz (girişte ensure_leverage yine koruma sağlar)."""
+    if CONFIG["dry_run"] or not symbols:
+        return symbols
+    try:
+        tiers = ex.fetch_leverage_tiers(symbols)
+    except Exception as e:
+        log.warning(f"⚠️  Kaldıraç filtresi atlandı (bilgi alınamadı): {e}")
+        return symbols
+    ok, dropped = [], []
+    for s in symbols:
+        ts = tiers.get(s) or []
+        try:
+            maxlev = max((t.get("maxLeverage") or 0) for t in ts) if ts else 0
+        except Exception:
+            maxlev = 0
+        # Bilgi yoksa (maxlev=0) tutma tarafında kal; varsa ve < min_lev ise çıkar
+        if maxlev == 0 or maxlev >= min_lev:
+            ok.append(s)
+        else:
+            dropped.append(f"{s.split('/')[0]}({maxlev}x)")
+    if dropped:
+        log.info(f"⛔ {min_lev}x desteklemeyen, çıkarıldı: {', '.join(dropped)}")
+    return ok
+
+
 def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
     log.info("🔍 Coin taraması başlıyor...")
     try:
@@ -397,7 +425,12 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         rejim = "↔️  karışık → her iki yön de mümkün"
     log.info(f"🧭 Piyasa rejimi: seçilen {len(df)} coinin {ups}'i ↑ / {downs}'i ↓   {rejim}")
 
-    log.info(f"🏆 En volatil {top_n} coin (hepsi taranacak, max {CONFIG['max_positions']} pozisyon açılacak):")
+    # 5x desteklemeyen coinleri ele (girişte ensure_leverage yine korur ama
+    # boşuna taramamak için listeye hiç almıyoruz)
+    syms = filter_min_leverage(ex, df["symbol"].tolist(), CONFIG["leverage"])
+    df = df[df["symbol"].isin(syms)]
+
+    log.info(f"🏆 En volatil {len(df)} coin (hepsi taranacak, max {CONFIG['max_positions']} pozisyon açılacak):")
     for _, r in df.iterrows():
         ok = "↑" if r["spct"] > 0 else "↓"
         log.info(f"   {r['symbol']:<28}  {ok}%{r['pct']:>5.1f}  {r['vol_m']:>8.1f}M")
