@@ -149,9 +149,23 @@ CONFIG = {
     "trade_usdt"          : 10,
     "max_positions"       : 2,
     "daily_loss_pct"      : 8.0,
+    "balance_refresh_sec" : 300,          # #5 günlük % CANLI bakiyeye göre (5 dk'da bir yenile)
     "cooldown_sl_sec"     : 3600,
     "cooldown_tp_sec"     : 600,
     "max_pos_hours"       : 4,            # 4 saat içinde kapanmazsa çık
+    "max_spread_pct"      : 0.0015,       # #6 giriş öncesi spread > %0.15 ise atla (likidite)
+
+    # ── #2 Trailing'i borsaya yansıt ─────────────────────────
+    # Trailing SL ilerledikçe borsadaki STOP emrini güncelle → bot çökse bile
+    # trailing kârın korunur. Her küçük harekette değil, eşik kadar oynayınca.
+    "sync_trailing_to_exchange": True,
+    "sl_sync_threshold_pct"    : 0.003,   # SL %0.3'ten fazla oynadıysa borsada güncelle
+
+    # ── #3 OHLCV cache (API yükü/ban riski azaltır) ──────────
+    # Yüksek zaman dilimleri sık değişmez; her döngüde yeniden çekme.
+    "cache_1d_sec"        : 3600,         # 1d mum saatte bir yenilensin
+    "cache_4h_sec"        : 900,          # 4h mum 15 dk'da bir
+    "cache_1h_sec"        : 60,           # 1h mum 1 dk'da bir
 
     # ── Komisyon ─────────────────────────────────────────────
     "commission"          : 0.0004,
@@ -389,6 +403,21 @@ def fetch_ohlcv(ex: ccxt.Exchange, symbol: str, tf: str, limit: int = 300) -> pd
     return df
 
 
+# #3: OHLCV cache — yüksek zaman dilimleri (1d/4h) her döngüde değişmez.
+# (symbol, tf) → (çekildiği_zaman, df). TTL içinde aynı df'i döner, API'yi yormaz.
+_OHLCV_CACHE: dict = {}
+
+def fetch_ohlcv_cached(ex, symbol: str, tf: str, limit: int, ttl: float) -> pd.DataFrame:
+    key = (symbol, tf)
+    now = time.time()
+    hit = _OHLCV_CACHE.get(key)
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+    df = fetch_ohlcv(ex, symbol, tf, limit)
+    _OHLCV_CACHE[key] = (now, df)
+    return df
+
+
 def get_btc_change(ex: ccxt.Exchange) -> float:
     """BTC'nin son 1 saatteki fiyat değişimini döner."""
     try:
@@ -407,6 +436,39 @@ def fetch_current_price(ex, symbol) -> float:
     try:
         return float(ex.fetch_ticker(symbol)["last"])
     except Exception:
+        return None
+
+
+def spread_ok(ex, symbol, max_spread: float) -> bool:
+    """#6: Giriş öncesi bid/ask spread'ini kontrol eder. Spread çok genişse
+    (düşük likidite) market emri fazla kayar → o girişi atla. Bilgi yoksa
+    veya hata olursa engellemez (True)."""
+    if CONFIG["dry_run"]:
+        return True
+    try:
+        t   = ex.fetch_ticker(symbol)
+        bid = t.get("bid"); ask = t.get("ask")
+        if not bid or not ask:
+            return True
+        spread = (float(ask) - float(bid)) / ((float(ask) + float(bid)) / 2)
+        if spread > max_spread:
+            log.info(f"⏭️  [{symbol}] Spread %{spread*100:.3f} > %{max_spread*100:.3f} → likidite düşük, atla")
+            return False
+        return True
+    except Exception:
+        return True
+
+
+def fetch_balance_quiet(ex):
+    """#5: Bakiyeyi sessizce (SystemExit fırlatmadan) okur. Periyodik yenileme
+    için — hata olursa None döner, çağıran eski değeri korur."""
+    if CONFIG["dry_run"]:
+        return None
+    try:
+        b = ex.fetch_balance()
+        return float(b["USDT"]["free"])
+    except Exception as e:
+        log.warning(f"⚠️  Bakiye yenilenemedi (eski değer kullanılıyor): {e}")
         return None
 
 # ─────────────────────────────────────────────────────────────
@@ -669,6 +731,7 @@ class Position:
         self.valley         = 0.0
         self.amount         = 0.0
         self.risk_pct       = 0.0   # |giriş - SL| / giriş → R-bazlı çıkış eşikleri için
+        self.exchange_sl    = 0.0   # #2 borsada ŞU AN duran STOP seviyesi (trailing senkronu için)
         self.open_time      = None
         self.cooldown_until = None
 
@@ -705,6 +768,7 @@ class Position:
         self.open_time   = time.time()
         self.amount      = amount   # caller'dan gelen, borsa precision'ına uygun miktar
         self.risk_pct    = abs(price - self.stop_loss) / price   # 1R = bu mesafe
+        self.exchange_sl = self.stop_loss   # send_open bu seviyeyi borsaya koyacak
 
         sl_pct = abs(price - self.stop_loss)   / price * 100
         tp_pct = abs(price - self.take_profit) / price * 100
@@ -902,6 +966,29 @@ def cancel_open_orders(ex, symbol):
                 log.warning(f"⚠️  [{symbol}] Emir {o['id']} iptal edilemedi: {e}")
     except Exception as e:
         log.warning(f"⚠️  [{symbol}] Açık emirler listelenemedi: {e}")
+
+
+def update_exchange_stop(ex, pos) -> bool:
+    """#2: Trailing SL ilerleyince borsadaki STOP emrini yeni seviyeye taşır.
+    Eski emirleri iptal edip STOP + TP'yi yeniden kurar. Böylece bot çökse bile
+    güncel (trailing) SL borsada durur. Başarılıysa pos.exchange_sl güncellenir."""
+    if CONFIG["dry_run"]:
+        pos.exchange_sl = pos.stop_loss
+        return True
+    cs  = "sell" if pos.side == "LONG" else "buy"
+    amt = _amt(ex, pos.symbol, pos.amount)
+    try:
+        cancel_open_orders(ex, pos.symbol)
+        ex.create_order(pos.symbol, "STOP_MARKET",        cs, amt,
+                        params={"stopPrice": _prc(ex, pos.symbol, pos.stop_loss),  "reduceOnly": True})
+        ex.create_order(pos.symbol, "TAKE_PROFIT_MARKET", cs, amt,
+                        params={"stopPrice": _prc(ex, pos.symbol, pos.take_profit), "reduceOnly": True})
+        pos.exchange_sl = pos.stop_loss
+        log.info(f"🔄 [{pos.symbol}] Borsa SL güncellendi → {pos.stop_loss:,.6f} (trailing senkron)")
+        return True
+    except Exception as e:
+        log.warning(f"⚠️  [{pos.symbol}] Borsa SL güncellenemedi (bot izlemeye devam eder): {e}")
+        return False
 
 
 def calc_amount(ex, symbol: str, price: float):
@@ -1157,6 +1244,7 @@ def reconcile_positions(ex, positions: dict):
             # R-bazlı çıkış eşikleri için risk mesafesini hesapla (restart sonrası da doğru çalışsın)
             if entry_price > 0:
                 pos.risk_pct = abs(entry_price - pos.stop_loss) / entry_price
+            pos.exchange_sl = pos.stop_loss   # #2 borsadaki güncel STOP seviyesi
             found += 1
         except Exception as e:
             log.warning(f"⚠️  Mutabakat: bir pozisyon işlenemedi: {e}")
@@ -1288,6 +1376,14 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
             # Kapatma başarısız olursa pozisyonu kapatmayı denemeye devam etsin diye pos.active kalır, return
             return
 
+        # #2: Çıkış tetiklenmedi ama trailing SL ilerlediyse borsadaki STOP'u güncelle.
+        # Sadece eşik kadar oynadıysa (gereksiz cancel/create churn'ü önler).
+        if cfg.get("sync_trailing_to_exchange") and pos.entry_price > 0:
+            moved = abs(pos.stop_loss - pos.exchange_sl) / pos.entry_price
+            if moved >= cfg["sl_sync_threshold_pct"]:
+                update_exchange_stop(ex, pos)
+        return   # pozisyon hâlâ açık → yeni girişe gerek yok, döngüyü hızlı tut
+
     # ── 2.5 Yeni giriş mümkün değilse AĞIR HESABI ATLA ──────────────
     # Pozisyon hâlâ açıksa, cooldown'daysa veya max pozisyon dolduysa yeni
     # giriş olamaz. Bu durumda 1d/4h/1h OHLCV çekmek gereksiz: hem API yükü
@@ -1308,9 +1404,9 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
         # OLUŞMAKTA OLAN (yarım) mumu döner; onu atmazsak indikatörler her 15sn'de
         # repaint eder (hacim yarım kalır, MACD/StochRSI/SuperTrend sürekli değişir)
         # ve bot mum kapanınca yok olacak sinyallere girer. iloc[:-1] = son KAPALI mum.
-        df1d = fetch_ohlcv(ex, symbol, cfg["daily_tf"],  limit=260).iloc[:-1].copy()
-        df4h = fetch_ohlcv(ex, symbol, cfg["trend_tf"],  limit=250).iloc[:-1].copy()
-        df1h = fetch_ohlcv(ex, symbol, cfg["entry_tf"],  limit=300).iloc[:-1].copy()
+        df1d = fetch_ohlcv_cached(ex, symbol, cfg["daily_tf"], 260, cfg["cache_1d_sec"]).iloc[:-1].copy()
+        df4h = fetch_ohlcv_cached(ex, symbol, cfg["trend_tf"], 250, cfg["cache_4h_sec"]).iloc[:-1].copy()
+        df1h = fetch_ohlcv_cached(ex, symbol, cfg["entry_tf"], 300, cfg["cache_1h_sec"]).iloc[:-1].copy()
 
         daily  = calc_daily_trend(df1d)
         trend  = calc_trend(df4h)
@@ -1333,6 +1429,8 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
             amount = calc_amount(ex, symbol, price)
             if amount is None:
                 pass   # calc_amount sebebini logladı (minimum altı → atla)
+            elif not spread_ok(ex, symbol, cfg["max_spread_pct"]):
+                pass   # #6 spread geniş → likidite düşük, atla (sebep loglandı)
             elif not ensure_leverage(ex, symbol, cfg["leverage"]):
                 pass   # kaldıraç doğrulanamadı → yanlış kaldıraç riski, AÇMA (sebep loglandı)
             else:
@@ -1356,7 +1454,9 @@ def main():
     global START_BALANCE
     cfg  = CONFIG
     ex   = connect_exchange()
-    START_BALANCE = fetch_balance(ex)
+    START_BALANCE   = fetch_balance(ex)
+    current_balance = START_BALANCE      # #5 günlük limit için CANLI bakiye (periyodik yenilenir)
+    last_bal_refresh = time.time()
     last_refresh  = time.time()
     symbols = cfg["symbols"] or get_symbols(ex, cfg["top_volatile_count"])
 
@@ -1398,7 +1498,14 @@ def main():
         symbols = symbols + held
 
     while True:
-        if pnl_tracker.daily_limit_hit(START_BALANCE):
+        # #5 Günlük zarar limitini CANLI bakiyeye göre ölç (periyodik yenile).
+        if not cfg["dry_run"] and time.time() - last_bal_refresh > cfg["balance_refresh_sec"]:
+            b = fetch_balance_quiet(ex)
+            if b is not None:
+                current_balance = b
+            last_bal_refresh = time.time()
+
+        if pnl_tracker.daily_limit_hit(current_balance):
             log.warning("💤 1 saat bekleniyor...")
             time.sleep(3600)
             continue
