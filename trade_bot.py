@@ -65,6 +65,7 @@ CONFIG = {
     # (exclude_bases / min_volatility / min_listing / 5x) DEVRE DIŞI kalır.
     # Tekrar dinamik taramaya dönmek istersen: "symbols" : [] yap.
     "symbols"             : [
+        # — ilk 23 (orijinal) —
         "BTC/USDT:USDT",  "ETH/USDT:USDT",  "SOL/USDT:USDT",
         "BNB/USDT:USDT",  "XRP/USDT:USDT",  "DOGE/USDT:USDT",
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
@@ -73,6 +74,16 @@ CONFIG = {
         "DOT/USDT:USDT",  "UNI/USDT:USDT",  "ATOM/USDT:USDT",
         "ARB/USDT:USDT",  "OP/USDT:USDT",   "SUI/USDT:USDT",
         "INJ/USDT:USDT",  "APT/USDT:USDT",  "TIA/USDT:USDT",
+        # — 50'ye tamamlayan 27 likit altcoin —
+        "TRX/USDT:USDT",  "ETC/USDT:USDT",  "XLM/USDT:USDT",
+        "ALGO/USDT:USDT", "VET/USDT:USDT",  "ICP/USDT:USDT",
+        "HBAR/USDT:USDT", "FET/USDT:USDT",  "RUNE/USDT:USDT",
+        "SEI/USDT:USDT",  "TON/USDT:USDT",  "ORDI/USDT:USDT",
+        "WLD/USDT:USDT",  "WIF/USDT:USDT",  "JUP/USDT:USDT",
+        "PYTH/USDT:USDT", "STX/USDT:USDT",  "IMX/USDT:USDT",
+        "ENA/USDT:USDT",  "CRV/USDT:USDT",  "LDO/USDT:USDT",
+        "DYDX/USDT:USDT", "GALA/USDT:USDT", "SAND/USDT:USDT",
+        "MANA/USDT:USDT", "AXS/USDT:USDT",  "GRT/USDT:USDT",
     ],
     "top_volatile_count"  : 50,          # (sadece dinamik tarama açıkken / symbols boşken kullanılır)
     "symbol_refresh_sec"  : 3600,        # saatte bir yenile
