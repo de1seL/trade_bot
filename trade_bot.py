@@ -492,6 +492,11 @@ def calc_trend(df: pd.DataFrame) -> dict | None:
     cfg = CONFIG
     c   = df["close"]
 
+    # Yeni listelenmiş coinlerde yeterli geçmiş olmayabilir. ta'nın ADX'i kısa
+    # seride NaN dönmek yerine IndexError fırlatıyor → önce uzunluğu garanti et.
+    if len(df) < cfg["ema_trend"] + cfg["adx_period"]:
+        return None
+
     ema200 = ta.trend.EMAIndicator(c, window=cfg["ema_trend"]).ema_indicator()
     ema20  = ta.trend.EMAIndicator(c, window=cfg["ema_fast"]).ema_indicator()
     ema50  = ta.trend.EMAIndicator(c, window=cfg["ema_slow"]).ema_indicator()
@@ -529,6 +534,11 @@ def calc_trend(df: pd.DataFrame) -> dict | None:
 def calc_entry(df: pd.DataFrame) -> dict | None:
     """1h giriş indikatörleri"""
     cfg = CONFIG
+
+    # Kısa geçmişli (yeni) coinlerde indikatörler çökebilir → yeterli mum yoksa atla
+    if len(df) < max(cfg["stoch_period"], cfg["rsi_period"], cfg["macd_slow"],
+                     cfg["atr_period"], cfg["vol_period"]) + 5:
+        return None
 
     # Stochastic RSI
     stoch = ta.momentum.StochRSIIndicator(

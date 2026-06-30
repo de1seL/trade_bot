@@ -124,24 +124,26 @@ def evaluate(ex, symbol: str, btc_chg: float):
     price = tb.fetch_current_price(ex, symbol)
     if price is None:
         return None
+    # TÜM hesabı tek try/except'e al — yeni listelenmiş / kısa geçmişli bir coin
+    # indikatörü çökertse o coini ATLA, tüm botu düşürme.
     try:
         df1d = tb.fetch_ohlcv(ex, symbol, CONFIG["daily_tf"], limit=260).iloc[:-1].copy()
         df4h = tb.fetch_ohlcv(ex, symbol, CONFIG["trend_tf"], limit=250).iloc[:-1].copy()
         df1h = tb.fetch_ohlcv(ex, symbol, CONFIG["entry_tf"], limit=300).iloc[:-1].copy()
-    except Exception as e:
-        log.warning(f"⚠️  [{symbol}] veri çekilemedi: {e}")
-        return None
 
-    daily = tb.calc_daily_trend(df1d)
-    trend = tb.calc_trend(df4h)
-    if trend is None:
+        daily = tb.calc_daily_trend(df1d)
+        trend = tb.calc_trend(df4h)
+        if trend is None:
+            return None
+        entry = tb.calc_entry(df1h)
+        if entry is None:
+            return None
+        trend_1h = tb.calc_1h_trend(df1h)
+        signal   = tb.get_signal(trend, entry, daily, btc_chg, trend_1h)
+        return {"price": price, "atr": entry["atr"], "signal": signal}
+    except Exception as e:
+        log.warning(f"⚠️  [{symbol}] değerlendirilemedi, atlanıyor: {e}")
         return None
-    entry = tb.calc_entry(df1h)
-    if entry is None:
-        return None
-    trend_1h = tb.calc_1h_trend(df1h)
-    signal   = tb.get_signal(trend, entry, daily, btc_chg, trend_1h)
-    return {"price": price, "atr": entry["atr"], "signal": signal}
 
 # ─────────────────────────────────────────────────────────────
 # MESAJLAR
