@@ -154,7 +154,7 @@ CONFIG = {
 
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,
-    "max_positions"       : 3,
+    "max_positions"       : 2,
     "daily_loss_pct"      : 8.0,
     "balance_refresh_sec" : 300,          # #5 günlük % CANLI bakiyeye göre (5 dk'da bir yenile)
     "cooldown_sl_sec"     : 3600,
