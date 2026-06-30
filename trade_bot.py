@@ -60,10 +60,11 @@ load_dotenv()
 
 CONFIG = {
     # ── Coinler ─────────────────────────────────────────────
-    # symbols BOŞ → bot her saat en likit/volatil coinleri kendi seçer (dinamik tarama).
-    # Sabit listeye dönmek istersen aşağıdaki "symbols_manual"deki coinleri "symbols"e taşı.
-    "symbols"             : [],
-    "symbols_manual"      : [   # yedek/referans — "symbols" boşken KULLANILMAZ
+    # SABİT LİSTE (ilk koddaki gibi) — BTC/ETH/BNB dahil bu coinler taranır.
+    # Bu liste DOLU olduğu için dinamik tarayıcı (get_symbols) ve onun filtreleri
+    # (exclude_bases / min_volatility / min_listing / 5x) DEVRE DIŞI kalır.
+    # Tekrar dinamik taramaya dönmek istersen: "symbols" : [] yap.
+    "symbols"             : [
         "BTC/USDT:USDT",  "ETH/USDT:USDT",  "SOL/USDT:USDT",
         "BNB/USDT:USDT",  "XRP/USDT:USDT",  "DOGE/USDT:USDT",
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
@@ -73,7 +74,7 @@ CONFIG = {
         "ARB/USDT:USDT",  "OP/USDT:USDT",   "SUI/USDT:USDT",
         "INJ/USDT:USDT",  "APT/USDT:USDT",  "TIA/USDT:USDT",
     ],
-    "top_volatile_count"  : 50,          # 50 coin tara
+    "top_volatile_count"  : 50,          # (sadece dinamik tarama açıkken / symbols boşken kullanılır)
     "symbol_refresh_sec"  : 3600,        # saatte bir yenile
 
     # ── Tarama filtreleri ───────────────────────────────────
