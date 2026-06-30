@@ -81,6 +81,8 @@ CONFIG = {
     "exclude_bases"       : ["BTC", "BNB"],   # bu coinleri HİÇ tarama (istersen ETH vb. ekle)
     "min_volatility_pct"  : 4.0,         # 24s |%değişim| < %4 olanları ELE → "gibi" durgunlar
                                          #   (ETH gibi az oynayanlar bu filtreyle zaten çıkar)
+    "min_listing_days"    : 45,          # 45 günden YENİ coinleri tarama → yeterli geçmiş yok
+                                         #   (4h EMA200 için ~36 gün şart; "trend verisi eksik"i önler)
 
     # ── Kaldıraç ────────────────────────────────────────────
     "leverage"            : 10,
@@ -345,10 +347,18 @@ STABLE   = {"USDT","BUSD","USDC","DAI","TUSD","FDUSD","USDP","UST"}
 # Tarama hiç sonuç vermezse yedek liste — BTC/BNB gibi durgunlar dahil DEĞİL (hareketli alt'lar)
 FALLBACK = ["SOL/USDT:USDT","XRP/USDT:USDT","DOGE/USDT:USDT","AVAX/USDT:USDT","LINK/USDT:USDT"]
 
-# Çalışma sırasında öğrenilen, taramadan KALICI çıkarılacak coinler:
-# yetersiz geçmiş (trend verisi eksik) ya da işlem açılamayan ürünler.
-# Tarayıcı bunları atlar, yerlerine sıradaki en volatil coinleri koyar.
-SKIP_SYMBOLS: set = set()
+
+def _listed_long_enough(m: dict, now_ms: int, min_age_ms: int) -> bool:
+    """Coin yeterince eski mi? Binance listeleme tarihine (onboardDate) bakar.
+    Yeni coinlerde 4h EMA200/ADX için yeterli mum olmaz → 'trend verisi eksik'.
+    Bilgi yoksa eleme yapma (True)."""
+    if min_age_ms <= 0:
+        return True
+    ob = (m.get("info") or {}).get("onboardDate")
+    try:
+        return ob is None or (now_ms - int(ob)) >= min_age_ms
+    except Exception:
+        return True
 
 
 def filter_min_leverage(ex, symbols: list[str], min_lev: int) -> list[str]:
@@ -389,12 +399,15 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         return FALLBACK
 
     exclude = {b.upper() for b in CONFIG.get("exclude_bases", [])}
+    now_ms     = ex.milliseconds()
+    min_age_ms = CONFIG.get("min_listing_days", 0) * 86_400_000
     valid = {
         m["symbol"] for m in markets.values()
         if m.get("type") == "swap" and m.get("linear")
         and m.get("active") and m.get("quote") == "USDT"
         and m.get("base") not in STABLE
         and m.get("base") not in exclude          # BTC/BNB gibi dışlananları ele
+        and _listed_long_enough(m, now_ms, min_age_ms)   # yeni coinleri (yetersiz geçmiş) ele
     }
 
     min_vol_pct = CONFIG.get("min_volatility_pct", 0.0)
@@ -416,10 +429,7 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
 
     df = pd.DataFrame(rows).sort_values("score", ascending=False)
 
-    # ── Çalışmayan coinleri ELE, sonra top_n al (yerlerine başka coin gelir) ──
-    # 1) Yetersiz geçmişli (trend verisi eksik) + TradFi kara listedekiler
-    df = df[~df["symbol"].isin(SKIP_SYMBOLS)]
-    # 2) 5x desteklemeyenler (sıra korunur)
+    # ── 5x desteklemeyenleri ELE, sonra top_n al (yerlerine başka coin gelir) ──
     ranked = filter_min_leverage(ex, df["symbol"].tolist(), CONFIG["leverage"])
     df = df[df["symbol"].isin(ranked)]
     # 3) Kalanların en volatil top_n'i → liste hep dolu kalır
@@ -1456,8 +1466,6 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
     # çıkışını CANLIDA geciktiriyor. Erken çık.
     if pos.active:
         return
-    if symbol in SKIP_SYMBOLS:
-        return   # daha önce "yetersiz veri" diye işaretlendi → bir daha uğraşma
     if pos.in_cooldown():
         mins = int((pos.cooldown_until - time.time()) / 60) + 1
         log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
@@ -1478,13 +1486,7 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
         daily  = calc_daily_trend(df1d)
         trend  = calc_trend(df4h)
         if trend is None:
-            # Yeterli geçmiş yoksa bu KALICI → coini taramadan tamamen çıkar,
-            # yerine başka coin gelsin (5x filtresindeki gibi). Geçiciyse sadece uyar.
-            if len(df4h) < cfg["ema_trend"] + cfg["adx_period"]:
-                SKIP_SYMBOLS.add(symbol)
-                log.info(f"🚫 [{symbol}] Yetersiz geçmiş (trend hesaplanamıyor) → listeden çıkarıldı, yerine başka coin gelecek")
-            else:
-                log.warning(f"⚠️  [{symbol}] Trend verisi eksik (geçici)")
+            log.warning(f"⚠️  [{symbol}] Trend verisi eksik")
             return
 
         entry = calc_entry(df1h)
