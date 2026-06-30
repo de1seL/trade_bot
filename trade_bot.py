@@ -60,33 +60,20 @@ load_dotenv()
 
 CONFIG = {
     # ── Coinler ─────────────────────────────────────────────
-    # SABİT LİSTE (ilk koddaki gibi) — BTC/ETH/BNB dahil bu coinler taranır.
-    # Bu liste DOLU olduğu için dinamik tarayıcı (get_symbols) ve onun filtreleri
-    # (exclude_bases / min_volatility / min_listing / 5x) DEVRE DIŞI kalır.
-    # Tekrar dinamik taramaya dönmek istersen: "symbols" : [] yap.
-    "symbols"             : [
-        # — ilk 23 (orijinal) —
-        "BTC/USDT:USDT",  "ETH/USDT:USDT",  "SOL/USDT:USDT",
-        "BNB/USDT:USDT",  "XRP/USDT:USDT",  "DOGE/USDT:USDT",
+    # HİBRİT TARAMA: ana coinler HER ZAMAN + en volatil coinler SAATLİK rotasyon.
+    #   "symbols"      BOŞ → dinamik mod açık (hibrit çalışır)
+    #   "core_symbols" → her zaman taranan sabit ana coinler (BTC/ETH/BNB...)
+    #   dinamik kısım  → en volatil top_volatile_count coin, saatte bir yenilenir
+    # Tamamen sabit liste istersen coinleri "symbols"e yaz (o zaman dinamik kapanır).
+    "symbols"             : [],
+    "core_symbols"        : [   # SABİT kalır, hiç düşmez
+        "BTC/USDT:USDT",  "ETH/USDT:USDT",  "BNB/USDT:USDT",
+        "SOL/USDT:USDT",  "XRP/USDT:USDT",  "DOGE/USDT:USDT",
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
-        "LTC/USDT:USDT",  "BCH/USDT:USDT",  "NEAR/USDT:USDT",
-        "AAVE/USDT:USDT", "FIL/USDT:USDT",
-        "DOT/USDT:USDT",  "UNI/USDT:USDT",  "ATOM/USDT:USDT",
-        "ARB/USDT:USDT",  "OP/USDT:USDT",   "SUI/USDT:USDT",
-        "INJ/USDT:USDT",  "APT/USDT:USDT",  "TIA/USDT:USDT",
-        # — 50'ye tamamlayan 27 likit altcoin —
-        "TRX/USDT:USDT",  "ETC/USDT:USDT",  "XLM/USDT:USDT",
-        "ALGO/USDT:USDT", "VET/USDT:USDT",  "ICP/USDT:USDT",
-        "HBAR/USDT:USDT", "FET/USDT:USDT",  "RUNE/USDT:USDT",
-        "SEI/USDT:USDT",  "TON/USDT:USDT",  "ORDI/USDT:USDT",
-        "WLD/USDT:USDT",  "WIF/USDT:USDT",  "JUP/USDT:USDT",
-        "PYTH/USDT:USDT", "STX/USDT:USDT",  "IMX/USDT:USDT",
-        "ENA/USDT:USDT",  "CRV/USDT:USDT",  "LDO/USDT:USDT",
-        "DYDX/USDT:USDT", "GALA/USDT:USDT", "SAND/USDT:USDT",
-        "MANA/USDT:USDT", "AXS/USDT:USDT",  "GRT/USDT:USDT",
+        "DOT/USDT:USDT",
     ],
-    "top_volatile_count"  : 50,          # (sadece dinamik tarama açıkken / symbols boşken kullanılır)
-    "symbol_refresh_sec"  : 3600,        # saatte bir yenile
+    "top_volatile_count"  : 40,          # ana coinlere EK olarak taranacak volatil coin sayısı
+    "symbol_refresh_sec"  : 3600,        # volatil kısım saatte bir yenilenir
 
     # ── Tarama filtreleri ───────────────────────────────────
     # Az hareket eden büyük-cap'leri dışla (küçük sermaye + 5x ile kâr çıkmaz).
@@ -467,6 +454,21 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         ok = "↑" if r["spct"] > 0 else "↓"
         log.info(f"   {r['symbol']:<28}  {ok}%{r['pct']:>5.1f}  {r['vol_m']:>8.1f}M")
     return df["symbol"].tolist()
+
+
+def build_scan_list(ex) -> list[str]:
+    """Taranacak coin listesini kurar:
+      • "symbols" doluysa → tam o sabit liste (dinamik kapalı).
+      • boşsa → core_symbols (sabit ANA coinler) + en volatil top_n (saatlik rotasyon).
+    Ana coinler her zaman başta ve listede kalır; volatil kısım saatte bir değişir."""
+    cfg = CONFIG
+    if cfg["symbols"]:
+        return list(dict.fromkeys(cfg["symbols"]))
+    core = list(cfg.get("core_symbols", []))
+    dyn  = get_symbols(ex, cfg["top_volatile_count"])
+    merged = list(dict.fromkeys(core + dyn))   # ana coinler önce, tekrarsız
+    log.info(f"🧩 Tarama listesi: {len(core)} ana coin (sabit) + {len(merged)-len(core)} volatil = {len(merged)} coin")
+    return merged
 
 # ─────────────────────────────────────────────────────────────
 # VERİ
@@ -1545,12 +1547,15 @@ def main():
     current_balance = START_BALANCE      # #5 günlük limit için CANLI bakiye (periyodik yenilenir)
     last_bal_refresh = time.time()
     last_refresh  = time.time()
-    symbols = cfg["symbols"] or get_symbols(ex, cfg["top_volatile_count"])
+    symbols = build_scan_list(ex)
 
     log.info("=" * 54)
     log.info("  🤖 Kripto Futures Bot v10.0")
     log.info(f"  Bakiye     : {START_BALANCE:.2f} USDT")
-    _scan_mode = "sabit liste" if cfg["symbols"] else f"dinamik (saatlik top {cfg['top_volatile_count']})"
+    if cfg["symbols"]:
+        _scan_mode = "sabit liste"
+    else:
+        _scan_mode = f"{len(cfg.get('core_symbols', []))} ana + saatlik top {cfg['top_volatile_count']} volatil"
     log.info(f"  Coinler    : {len(symbols)} coin — {_scan_mode}  (max {cfg['max_positions']} pozisyon)")
     log.info(f"  Kaldıraç   : {cfg['leverage']}x")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
@@ -1570,9 +1575,9 @@ def main():
         time.sleep(0.2)
 
     # Dinamik taramada mevcut bir pozisyon, o anki tarama listesinde olmayan bir
-    # coinde olabilir. Mutabakatın onu da görebilmesi için referans coinleri ekle
+    # coinde olabilir. Mutabakatın onu da görebilmesi için ana coinleri ekle
     # (setup_symbol gerekmez — sadece varsa yüklenip yönetilecek).
-    for sym in cfg.get("symbols_manual", []):
+    for sym in cfg.get("core_symbols", []):
         positions.setdefault(sym, Position(sym))
 
     # Restart mutabakatı — borsadaki açık pozisyonları yükle (çift pozisyonu önler)
@@ -1598,8 +1603,8 @@ def main():
             continue
 
         if not cfg["symbols"] and time.time() - last_refresh > cfg["symbol_refresh_sec"]:
-            log.info("🔄 Semboller yenileniyor...")
-            new_syms = get_symbols(ex, cfg["top_volatile_count"])
+            log.info("🔄 Volatil coinler yenileniyor (ana coinler sabit kalır)...")
+            new_syms = build_scan_list(ex)   # ana coinler + taze volatil liste
             for s in new_syms:
                 if s not in positions:
                     positions[s] = Position(s)
@@ -1609,7 +1614,7 @@ def main():
             held = [s for s, p in positions.items() if p.active and s not in new_syms]
             if held:
                 log.info(f"📌 Açık pozisyonlu coinler listede tutuluyor: {', '.join(held)}")
-            symbols      = new_syms + held
+            symbols      = list(dict.fromkeys(new_syms + held))
             last_refresh = time.time()
 
         # BTC korelasyon filtresi için BTC değişimini al
