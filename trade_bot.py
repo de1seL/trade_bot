@@ -807,6 +807,52 @@ def send_open(ex, symbol, side, amount, price, sl, tp) -> bool:
     return True
 
 
+def update_exchange_sl(ex, symbol, pos) -> bool:
+    """Trailing/breakeven SL'yi yukarı çekince borsadaki STOP_MARKET emrini
+    iptal edip yeni seviyeden tekrar kurar. TAKE_PROFIT_MARKET emrine DOKUNMAZ.
+    Böylece koruma 'yumuşak' (bota bağlı) olmaktan çıkıp borsada garantili olur."""
+    if CONFIG["dry_run"]:
+        log.info(f"[DRY RUN] [{symbol}] Borsa SL güncellenir → {pos.stop_loss:,.6f}")
+        return True
+
+    cs = "sell" if pos.side == "LONG" else "buy"
+
+    # 1. Mevcut STOP_MARKET (SL) emrini bul ve iptal et — TP emrine dokunma
+    try:
+        open_orders = ex.fetch_open_orders(symbol)
+    except Exception as e:
+        log.warning(f"⚠️  [{symbol}] SL güncelleme: açık emirler okunamadı, atlanıyor: {e}")
+        return False
+
+    for o in open_orders:
+        info  = o.get("info", {}) or {}
+        otype = str(info.get("type") or o.get("type") or "").upper()
+        stop  = info.get("stopPrice") or o.get("triggerPrice") or o.get("stopPrice")
+        if stop in (None, "", 0, "0"):
+            continue
+        if "TAKE_PROFIT" in otype:
+            continue                       # TP emri — korunmalı
+        if "STOP" in otype:
+            try:
+                ex.cancel_order(o["id"], symbol)
+            except Exception as e:
+                log.warning(f"⚠️  [{symbol}] Eski SL emri ({o.get('id')}) iptal edilemedi: {e}")
+
+    # 2. Yeni SL emrini güncel seviyeden kur
+    sl_p = _prc(ex, symbol, pos.stop_loss)
+    amt  = _amt(ex, symbol, pos.amount)
+    try:
+        ex.create_order(symbol, "STOP_MARKET", cs, amt, params={"stopPrice": sl_p, "reduceOnly": True})
+        log.info(f"🔄 [{symbol}] Borsa SL güncellendi → {sl_p:,.6f} (trailing/breakeven kilitlendi)")
+        return True
+    except Exception as e:
+        log.error(
+            f"🚨 [{symbol}] Yeni SL emri kurulamadı — pozisyon borsada SL'siz kalmış olabilir, "
+            f"bot izlemeye devam ediyor: {e}"
+        )
+        return False
+
+
 def cancel_open_orders(ex, symbol):
     """Sembole ait tüm açık emirleri iptal eder (STOP_MARKET ve TAKE_PROFIT_MARKET dahil)."""
     # 1. Toplu iptal dene
@@ -1194,13 +1240,20 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
                 pos.close(price, "BTC_DUMP")
             return
 
-        reason = pos.check_exit(price)
+        prev_sl = pos.stop_loss
+        reason  = pos.check_exit(price)
         if reason:
             ok = send_close(ex, symbol, pos.side, pos.amount, price)
             if ok:
                 pos.close(price, reason)
             # Kapatma başarısız olursa pozisyonu kapatmayı denemeye devam etsin diye pos.active kalır, return
             return
+
+        # Trailing/breakeven SL'yi yukarı çektiyse borsadaki STOP_MARKET emrini de senkronize et.
+        # update_trailing SL'yi yalnızca lehe (LONG'da yukarı, SHORT'ta aşağı) hareket ettirir,
+        # bu yüzden değişiklik varsa koruma her zaman iyileşmiş demektir.
+        if pos.active and pos.stop_loss != prev_sl:
+            update_exchange_sl(ex, symbol, pos)
 
     # ── 3. Sinyal hesaplamaları (sadece yeni giriş için gerekli) ──
     try:
