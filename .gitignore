@@ -1,0 +1,15 @@
+# Python derleme çıktıları
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Sanal ortamlar
+.venv/
+venv/
+env/
+
+# Ortam değişkenleri / API anahtarları
+.env
+
+# Log dosyaları
+*.log
