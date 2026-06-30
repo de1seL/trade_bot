@@ -345,6 +345,11 @@ STABLE   = {"USDT","BUSD","USDC","DAI","TUSD","FDUSD","USDP","UST"}
 # Tarama hiç sonuç vermezse yedek liste — BTC/BNB gibi durgunlar dahil DEĞİL (hareketli alt'lar)
 FALLBACK = ["SOL/USDT:USDT","XRP/USDT:USDT","DOGE/USDT:USDT","AVAX/USDT:USDT","LINK/USDT:USDT"]
 
+# Çalışma sırasında öğrenilen, taramadan KALICI çıkarılacak coinler:
+# yetersiz geçmiş (trend verisi eksik) ya da işlem açılamayan ürünler.
+# Tarayıcı bunları atlar, yerlerine sıradaki en volatil coinleri koyar.
+SKIP_SYMBOLS: set = set()
+
 
 def filter_min_leverage(ex, symbols: list[str], min_lev: int) -> list[str]:
     """Borsada max kaldıracı min_lev (5x) altında olan coinleri listeden çıkarır.
@@ -409,12 +414,22 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
     if not rows:
         return FALLBACK
 
-    df = pd.DataFrame(rows).sort_values("score", ascending=False).head(top_n)
+    df = pd.DataFrame(rows).sort_values("score", ascending=False)
+
+    # ── Çalışmayan coinleri ELE, sonra top_n al (yerlerine başka coin gelir) ──
+    # 1) Yetersiz geçmişli (trend verisi eksik) + TradFi kara listedekiler
+    df = df[~df["symbol"].isin(SKIP_SYMBOLS)]
+    # 2) 5x desteklemeyenler (sıra korunur)
+    ranked = filter_min_leverage(ex, df["symbol"].tolist(), CONFIG["leverage"])
+    df = df[df["symbol"].isin(ranked)]
+    # 3) Kalanların en volatil top_n'i → liste hep dolu kalır
+    df = df.sort_values("score", ascending=False).head(top_n)
+    if df.empty:
+        return FALLBACK
 
     # ── Rejim özeti ──────────────────────────────────────────
     # Tarayıcı en çok HAREKET edeni seçer. Kırmızı günde bunlar düşenlerdir →
-    # bot ağırlıkla SHORT arar (bu bir hata değil, piyasa böyle). Aşağıdaki
-    # özet "neden hep short?" sorusunu gözle doğrulamanı sağlar.
+    # bot ağırlıkla SHORT arar (bu bir hata değil, piyasa böyle).
     ups   = int((df["spct"] > 0).sum())
     downs = int((df["spct"] < 0).sum())
     if downs > ups * 2:
@@ -424,11 +439,6 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
     else:
         rejim = "↔️  karışık → her iki yön de mümkün"
     log.info(f"🧭 Piyasa rejimi: seçilen {len(df)} coinin {ups}'i ↑ / {downs}'i ↓   {rejim}")
-
-    # 5x desteklemeyen coinleri ele (girişte ensure_leverage yine korur ama
-    # boşuna taramamak için listeye hiç almıyoruz)
-    syms = filter_min_leverage(ex, df["symbol"].tolist(), CONFIG["leverage"])
-    df = df[df["symbol"].isin(syms)]
 
     log.info(f"🏆 En volatil {len(df)} coin (hepsi taranacak, max {CONFIG['max_positions']} pozisyon açılacak):")
     for _, r in df.iterrows():
@@ -1446,6 +1456,8 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
     # çıkışını CANLIDA geciktiriyor. Erken çık.
     if pos.active:
         return
+    if symbol in SKIP_SYMBOLS:
+        return   # daha önce "yetersiz veri" diye işaretlendi → bir daha uğraşma
     if pos.in_cooldown():
         mins = int((pos.cooldown_until - time.time()) / 60) + 1
         log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
@@ -1466,7 +1478,13 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
         daily  = calc_daily_trend(df1d)
         trend  = calc_trend(df4h)
         if trend is None:
-            log.warning(f"⚠️  [{symbol}] Trend verisi eksik")
+            # Yeterli geçmiş yoksa bu KALICI → coini taramadan tamamen çıkar,
+            # yerine başka coin gelsin (5x filtresindeki gibi). Geçiciyse sadece uyar.
+            if len(df4h) < cfg["ema_trend"] + cfg["adx_period"]:
+                SKIP_SYMBOLS.add(symbol)
+                log.info(f"🚫 [{symbol}] Yetersiz geçmiş (trend hesaplanamıyor) → listeden çıkarıldı, yerine başka coin gelecek")
+            else:
+                log.warning(f"⚠️  [{symbol}] Trend verisi eksik (geçici)")
             return
 
         entry = calc_entry(df1h)
