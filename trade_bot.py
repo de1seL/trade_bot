@@ -199,13 +199,18 @@ class PnLTracker:
         self.wins        = 0
         self.losses      = 0
 
+    def _roll_day_if_needed(self):
+        """Gün değiştiyse günlük PnL'i sıfırla. Hem işlem kaydında hem limit
+        kontrolünde çağrılır — böylece bot duraklarken gün dönünce kendi devam eder."""
+        if date.today() != self.daily_date:
+            self.daily_pnl  = 0.0
+            self.daily_date = date.today()
+
     def record(self, pnl_pct: float, usdt: float):
         pnl_usdt = usdt * pnl_pct / 100
         self.session_pnl += pnl_usdt
         self.total       += 1
-        if date.today() != self.daily_date:
-            self.daily_pnl  = 0.0
-            self.daily_date = date.today()
+        self._roll_day_if_needed()
         self.daily_pnl += pnl_usdt
         if pnl_pct >= 0:
             self.wins += 1
@@ -219,6 +224,10 @@ class PnLTracker:
         )
 
     def daily_limit_hit(self, balance: float) -> bool:
+        # ÖNEMLİ: önce gün dönüşünü kontrol et. Yoksa limite takılınca bot durur ve
+        # daily_pnl yalnızca record()'da sıfırlandığı için (duraklarken işlem yok)
+        # ertesi gün bile açılmaz — kalıcı kilit. Bu satır o kilidi önler.
+        self._roll_day_if_needed()
         if balance <= 0:
             return False
         if self.daily_pnl < 0 and abs(self.daily_pnl) / balance * 100 >= CONFIG["daily_loss_pct"]:
@@ -288,6 +297,25 @@ def setup_symbol(ex: ccxt.Exchange, symbol: str, leverage: int):
         # -4046 "No need to change margin type" zaten isolated demektir, zararsız
         if "4046" not in str(e) and "No need" not in str(e):
             log.warning(f"⚠️  {symbol} margin modu: {e}")
+
+
+def ensure_leverage(ex: ccxt.Exchange, symbol: str, leverage: int) -> bool:
+    """Pozisyon açmadan HEMEN ÖNCE kaldıracı ayarlar ve doğrular.
+    Ayarlanamazsa False döner → çağıran pozisyon AÇMAZ. Böylece kaldıraç
+    ayarı sessizce başarısız olunca hesabın mevcut (belki 20x) kaldıracıyla
+    yanlışlıkla işlem açma riski ortadan kalkar."""
+    if CONFIG["dry_run"]:
+        return True
+    try:
+        ex.set_leverage(leverage, symbol)
+        return True
+    except Exception as e:
+        msg = str(e)
+        # Zaten istenen kaldıraçtaysa Binance bazen "no need to change" der → sorun değil
+        if "no need" in msg.lower() or "-4046" in msg:
+            return True
+        log.error(f"🚫 [{symbol}] Kaldıraç {leverage}x doğrulanamadı → pozisyon AÇILMAYACAK: {e}")
+        return False
 
 # ─────────────────────────────────────────────────────────────
 # SEMBOL SEÇİCİ
@@ -1305,6 +1333,8 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
             amount = calc_amount(ex, symbol, price)
             if amount is None:
                 pass   # calc_amount sebebini logladı (minimum altı → atla)
+            elif not ensure_leverage(ex, symbol, cfg["leverage"]):
+                pass   # kaldıraç doğrulanamadı → yanlış kaldıraç riski, AÇMA (sebep loglandı)
             else:
                 pos.open(signal, price, entry["atr"], amount)
                 ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
