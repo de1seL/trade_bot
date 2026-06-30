@@ -50,9 +50,15 @@ log    = tb.log
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# Aynı anda kaç açık (kapanmamış) sinyal takip edilsin. Auto-bot ile aynı mantık
-# için max_positions; daha çok sinyal görmek istersen bu sayıyı büyüt.
-SIGNAL_MAX_ACTIVE = CONFIG["max_positions"]
+# Kaç coin taransın. Sinyal botu trade_bot'tan BAĞIMSIZ (CONFIG'i bozmaz):
+# trade_bot 25 tararken sinyal botu 50 tarayabilir.
+SCAN_COUNT = 50
+
+# Aynı anda kaç açık (kapanmamış) sinyal takip edilsin.
+# Sinyal botunda pozisyon/marj sınırı YOK → kaç coin iyi sinyal verirse hepsi
+# yollanır. SCAN_COUNT'a eşit = pratikte sınırsız (coin başına zaten tek sinyal).
+# Daha az bildirim istersen küçült (örn. 10).
+SIGNAL_MAX_ACTIVE = SCAN_COUNT
 
 # Çıkış (TP/SL vurdu) mesajı da atılsın mı?
 SEND_EXIT_ALERTS  = True
@@ -185,7 +191,7 @@ def main():
 
     ex = connect_public()
 
-    symbols = CONFIG["symbols"] or tb.get_symbols(ex, CONFIG["top_volatile_count"])
+    symbols = CONFIG["symbols"] or tb.get_symbols(ex, SCAN_COUNT)
     last_refresh = time.time()
 
     active    = {}   # symbol -> {"side","entry","sl","tp","time"} (takip edilen açık sinyal)
@@ -193,13 +199,14 @@ def main():
 
     log.info("=" * 54)
     log.info("  📨 Sinyal Botu (Telegram)")
-    log.info(f"  Coinler        : {len(symbols)} ({'sabit liste' if CONFIG['symbols'] else 'dinamik tarama'})")
-    log.info(f"  Aynı anda sinyal: max {SIGNAL_MAX_ACTIVE}")
+    _cap = "sınırsız (iyi sinyal varsa hepsi)" if SIGNAL_MAX_ACTIVE >= len(symbols) else f"max {SIGNAL_MAX_ACTIVE}"
+    log.info(f"  Coinler        : {len(symbols)} taranıyor ({'sabit liste' if CONFIG['symbols'] else 'dinamik'})")
+    log.info(f"  Sinyal limiti   : {_cap}")
     log.info(f"  Çıkış uyarısı   : {'açık' if SEND_EXIT_ALERTS else 'kapalı'}")
     log.info("=" * 54)
     send_message(
         f"📨 <b>Sinyal botu başladı</b>\n"
-        f"{len(symbols)} coin taranıyor, en fazla {SIGNAL_MAX_ACTIVE} eşzamanlı sinyal.\n"
+        f"{len(symbols)} coin taranıyor — iyi sinyal veren her coin için mesaj gelecek.\n"
         f"⏱ {datetime.now():%Y-%m-%d %H:%M}"
     )
 
@@ -207,7 +214,7 @@ def main():
         # Dinamik sembol yenileme (açık sinyalli coinleri düşürmeden — trade_bot ile aynı mantık)
         if not CONFIG["symbols"] and time.time() - last_refresh > CONFIG["symbol_refresh_sec"]:
             log.info("🔄 Semboller yenileniyor...")
-            new_syms = tb.get_symbols(ex, CONFIG["top_volatile_count"])
+            new_syms = tb.get_symbols(ex, SCAN_COUNT)
             held     = [s for s in active if s not in new_syms]
             symbols      = new_syms + held
             last_refresh = time.time()
