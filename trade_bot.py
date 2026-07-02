@@ -155,7 +155,12 @@ CONFIG = {
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,
     "max_positions"       : 2,
-    "daily_loss_pct"      : 8.0,
+    # Günlük ZARAR limiti KAPALI (kullanıcı kaldırdı) — -%8'de durma yok.
+    "daily_loss_enabled"  : False,
+    "daily_loss_pct"      : 8.0,           # (sadece daily_loss_enabled True ise geçerli)
+    # Günlük KÂR hedefi: +%X'e ulaşınca N saat YENİ İŞLEM açma (açık pozisyonlar yönetilir).
+    "daily_profit_target_pct": 20.0,       # +%20 günlük kâr
+    "profit_pause_hours"     : 12,         # → 12 saat yeni işlem yok
     "balance_refresh_sec" : 300,          # #5 günlük % CANLI bakiyeye göre (5 dk'da bir yenile)
     "cooldown_sl_sec"     : 3600,
     "cooldown_tp_sec"     : 600,
@@ -252,9 +257,16 @@ class PnLTracker:
         if balance <= 0:
             return False
         if self.daily_pnl < 0 and abs(self.daily_pnl) / balance * 100 >= CONFIG["daily_loss_pct"]:
-            log.warning(f"🛑 Günlük limit → 1 saat duruyor")
+            log.warning(f"🛑 Günlük zarar limiti → 1 saat duruyor")
             return True
         return False
+
+    def daily_profit_hit(self, balance: float, target_pct: float) -> bool:
+        """Günlük KÂR hedefe ulaştı mı? (bakiyenin +%target'ı)."""
+        self._roll_day_if_needed()
+        if balance <= 0:
+            return False
+        return self.daily_pnl > 0 and (self.daily_pnl / balance * 100) >= target_pct
 
 pnl_tracker   = PnLTracker()
 START_BALANCE = 0.0
@@ -1416,7 +1428,7 @@ def count_open(positions: dict) -> int:
     return sum(1 for p in positions.values() if p.active)
 
 
-def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
+def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, allow_entry: bool = True):
     cfg = CONFIG
     # ── 1. Anlık fiyatı al (pozisyon çıkışı için her şeyden önemli) ──
     price = fetch_current_price(ex, symbol)
@@ -1480,6 +1492,8 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None):
     # çıkışını CANLIDA geciktiriyor. Erken çık.
     if pos.active:
         return
+    if not allow_entry:
+        return   # günlük kâr hedefi molası → yeni işlem yok (açık pozisyonlar yukarıda yönetildi)
     if pos.in_cooldown():
         mins = int((pos.cooldown_until - time.time()) / 60) + 1
         log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
@@ -1562,7 +1576,8 @@ def main():
     log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']}")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
-    log.info(f"  Günlük Lim : %{cfg['daily_loss_pct']}")
+    log.info(f"  Zarar Lim  : {('%'+str(cfg['daily_loss_pct'])) if cfg.get('daily_loss_enabled', False) else 'KAPALI'}")
+    log.info(f"  Kâr Hedefi : +%{cfg['daily_profit_target_pct']:.0f} → {cfg['profit_pause_hours']}s mola")
     if cfg.get("roi_tp_enabled"):
         log.info(f"  ROI TP     : +%{cfg['roi_tp_pct']*100:.1f} kaldıraçlı kârda anında kapat (aktif)")
     log.info(f"  Mod        : {'🧪 DRY RUN' if cfg['dry_run'] else '💰 CANLI'}")
@@ -1589,18 +1604,29 @@ def main():
         log.info(f"📌 Tarama dışı açık pozisyonlar yönetime alındı: {', '.join(held)}")
         symbols = symbols + held
 
+    pause_until = 0.0     # günlük kâr hedefi molası bitiş zamanı
+    pause_day   = None    # o gün mola verildi mi (günde 1 kez)
     while True:
-        # #5 Günlük zarar limitini CANLI bakiyeye göre ölç (periyodik yenile).
+        # #5 Günlük % için CANLI bakiyeyi periyodik yenile.
         if not cfg["dry_run"] and time.time() - last_bal_refresh > cfg["balance_refresh_sec"]:
             b = fetch_balance_quiet(ex)
             if b is not None:
                 current_balance = b
             last_bal_refresh = time.time()
 
-        if pnl_tracker.daily_limit_hit(current_balance):
-            log.warning("💤 1 saat bekleniyor...")
+        # Günlük ZARAR limiti — varsayılan KAPALI (kullanıcı -%8 durmayı kaldırdı)
+        if cfg.get("daily_loss_enabled", False) and pnl_tracker.daily_limit_hit(current_balance):
+            log.warning("💤 Günlük zarar limiti → 1 saat bekleniyor...")
             time.sleep(3600)
             continue
+
+        # Günlük KÂR hedefi → N saat YENİ İŞLEM açma (açık pozisyonlar yönetilmeye devam eder)
+        if pause_day != date.today() and pnl_tracker.daily_profit_hit(current_balance, cfg["daily_profit_target_pct"]):
+            pause_until = time.time() + cfg["profit_pause_hours"] * 3600
+            pause_day   = date.today()
+            log.info(f"🎯 Günlük +%{cfg['daily_profit_target_pct']:.0f} hedefe ulaşıldı → "
+                     f"{cfg['profit_pause_hours']} saat YENİ işlem YOK (açık pozisyonlar yönetiliyor)")
+        allow_entry = time.time() >= pause_until
 
         if not cfg["symbols"] and time.time() - last_refresh > cfg["symbol_refresh_sec"]:
             log.info("🔄 Volatil coinler yenileniyor (ana coinler sabit kalır)...")
@@ -1625,8 +1651,12 @@ def main():
         # Borsadaki gerçek pozisyon durumunu bir kez çek (dış kapanışları yakala)
         live_pos = fetch_live_positions(ex, symbols)
 
+        if not allow_entry:
+            mins = int((pause_until - time.time()) / 60) + 1
+            log.info(f"🎯 Kâr hedefi molası: {mins} dk daha yeni işlem yok (açık pozisyonlar yönetiliyor)")
+
         for sym in symbols:
-            run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos)
+            run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos, allow_entry)
             time.sleep(0.5)
 
         open_c = count_open(positions)
