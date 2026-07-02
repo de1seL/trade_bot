@@ -158,7 +158,7 @@ CONFIG = {
     "consec_loss_pause_hours": 2,
     "daily_loss_enabled"  : True,         # günlük zarar freni AÇIK
     "daily_loss_pct"      : 15.0,         # günlük -%15'e ulaşınca dur (1 saat)
-    "daily_profit_target_pct": 20.0,
+    "daily_profit_target_pct": 50.0,     # günlük +%50 kâra ulaşınca 12 saat mola
     "profit_pause_hours"     : 12,
     "balance_refresh_sec" : 300,
     "cooldown_sl_sec"     : 3600,
