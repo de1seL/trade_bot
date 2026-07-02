@@ -143,7 +143,7 @@ CONFIG = {
     "trail_max_pct"       : 0.025,
 
     # ── Giriş eşiği ─────────────────────────────────────────
-    "min_conditions"      : 4,    # 6 koşuldan en az 4'ü sağlanmalı (+ zorunlu tetik)
+    "min_conditions"      : 3,    # 6 koşuldan en az 3'ü sağlanmalı (+ zorunlu tetik)
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
