@@ -162,8 +162,9 @@ CONFIG = {
     "daily_profit_target_pct": 20.0,       # +%20 günlük kâr
     "profit_pause_hours"     : 12,         # → 12 saat yeni işlem yok
     "balance_refresh_sec" : 300,          # #5 günlük % CANLI bakiyeye göre (5 dk'da bir yenile)
-    "cooldown_sl_sec"     : 3600,
-    "cooldown_tp_sec"     : 600,
+    # Bir coin kapanınca (KÂR da olsa ZARAR da) o coinde 1 saat yeni işlem yok
+    "cooldown_sl_sec"     : 3600,        # zarar/SL sonrası 1 saat
+    "cooldown_tp_sec"     : 3600,        # kâr/TP sonrası da 1 saat
     "max_pos_hours"       : 4,            # 4 saat içinde kapanmazsa çık
     "max_spread_pct"      : 0.0015,       # #6 giriş öncesi spread > %0.15 ise atla (likidite)
 
