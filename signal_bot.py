@@ -50,15 +50,14 @@ log    = tb.log
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# Kaç coin taransın. Sinyal botu trade_bot'tan BAĞIMSIZ (CONFIG'i bozmaz):
-# trade_bot 25 tararken sinyal botu 50 tarayabilir.
-SCAN_COUNT = 50
-
-# Aynı anda kaç açık (kapanmamış) sinyal takip edilsin.
-# Sinyal botunda pozisyon/marj sınırı YOK → kaç coin iyi sinyal verirse hepsi
-# yollanır. SCAN_COUNT'a eşit = pratikte sınırsız (coin başına zaten tek sinyal).
+# Sinyal botu, trade_bot ile AYNI evreni tarar (core coinler + volatil) →
+# sinyaller trade_bot'un açacağı işlemlerle eşleşir. Tarama listesi ve strateji
+# tamamen trade_bot'tan gelir (tek kaynak).
+#
+# Aynı anda kaç açık (kapanmamış) sinyal takip edilsin. Sinyal botunda
+# pozisyon/marj sınırı YOK → pratikte sınırsız (coin başına zaten tek sinyal).
 # Daha az bildirim istersen küçült (örn. 10).
-SIGNAL_MAX_ACTIVE = SCAN_COUNT
+SIGNAL_MAX_ACTIVE = 100
 
 # Çıkış (TP/SL vurdu) mesajı da atılsın mı?
 SEND_EXIT_ALERTS  = True
@@ -138,8 +137,8 @@ def evaluate(ex, symbol: str, btc_chg: float):
         entry = tb.calc_entry(df1h)
         if entry is None:
             return None
-        trend_1h = tb.calc_1h_trend(df1h)
-        signal   = tb.get_signal(trend, entry, daily, btc_chg, trend_1h)
+        entry_trend = tb.calc_entry_trend(df1h)   # trade_bot'ta calc_1h_trend → calc_entry_trend
+        signal      = tb.get_signal(trend, entry, daily, btc_chg, entry_trend)
         return {"price": price, "atr": entry["atr"], "signal": signal}
     except Exception as e:
         log.warning(f"⚠️  [{symbol}] değerlendirilemedi, atlanıyor: {e}")
@@ -193,7 +192,7 @@ def main():
 
     ex = connect_public()
 
-    symbols = CONFIG["symbols"] or tb.get_symbols(ex, SCAN_COUNT)
+    symbols = tb.build_scan_list(ex)   # core + volatil (trade_bot ile aynı)
     last_refresh = time.time()
 
     active    = {}   # symbol -> {"side","entry","sl","tp","time"} (takip edilen açık sinyal)
@@ -202,7 +201,8 @@ def main():
     log.info("=" * 54)
     log.info("  📨 Sinyal Botu (Telegram)")
     _cap = "sınırsız (iyi sinyal varsa hepsi)" if SIGNAL_MAX_ACTIVE >= len(symbols) else f"max {SIGNAL_MAX_ACTIVE}"
-    log.info(f"  Coinler        : {len(symbols)} taranıyor ({'sabit liste' if CONFIG['symbols'] else 'dinamik'})")
+    _mode = "sabit liste" if CONFIG["symbols"] else f"{len(CONFIG.get('core_symbols', []))} core + volatil"
+    log.info(f"  Coinler        : {len(symbols)} taranıyor ({_mode}) — trade_bot ile aynı")
     log.info(f"  Sinyal limiti   : {_cap}")
     log.info(f"  Çıkış uyarısı   : {'açık' if SEND_EXIT_ALERTS else 'kapalı'}")
     log.info("=" * 54)
@@ -215,10 +215,10 @@ def main():
     while True:
         # Dinamik sembol yenileme (açık sinyalli coinleri düşürmeden — trade_bot ile aynı mantık)
         if not CONFIG["symbols"] and time.time() - last_refresh > CONFIG["symbol_refresh_sec"]:
-            log.info("🔄 Semboller yenileniyor...")
-            new_syms = tb.get_symbols(ex, SCAN_COUNT)
+            log.info("🔄 Volatil coinler yenileniyor (core sabit)...")
+            new_syms = tb.build_scan_list(ex)
             held     = [s for s in active if s not in new_syms]
-            symbols      = new_syms + held
+            symbols      = list(dict.fromkeys(new_syms + held))
             last_refresh = time.time()
 
         btc_chg = tb.get_btc_change(ex)
