@@ -1376,6 +1376,40 @@ def count_open(positions: dict) -> int:
     return sum(1 for p in positions.values() if p.active)
 
 
+def log_open_positions(ex, positions: dict) -> float:
+    """Açık pozisyonları ve gerçekleşmemiş (unrealized) PnL'lerini gösterir.
+    Toplam açık USDT PnL'i döner."""
+    cfg = CONFIG
+    open_pos = [p for p in positions.values() if p.active]
+    if not open_pos:
+        return 0.0
+    lines = [f"📂 AÇIK POZİSYONLAR ({len(open_pos)}/{cfg['max_positions']}):"]
+    total_usdt = 0.0
+    for p in open_pos:
+        price = fetch_current_price(ex, p.symbol) or p.entry_price
+        if p.side == "LONG":
+            pnl_pct = (price / p.entry_price - 1) * 100
+            usdt    = p.amount * (price - p.entry_price)
+        else:
+            pnl_pct = (p.entry_price / price - 1) * 100
+            usdt    = p.amount * (p.entry_price - price)
+        pnl_lev = pnl_pct * cfg["leverage"]     # marj üzerindeki % (kaldıraçlı)
+        total_usdt += usdt
+        dur   = int((time.time() - p.open_time) / 60) if p.open_time else 0
+        emoji = "🟢" if pnl_lev >= 0 else "🔴"
+        coin  = p.symbol.split("/")[0]
+        arrow = "📈" if p.side == "LONG" else "📉"
+        lines.append(
+            f"   {emoji} {arrow} {coin:<6} {p.side:<5}  "
+            f"giriş={p.entry_price:,.6f} → {price:,.6f}  "
+            f"PnL: {pnl_lev:+.2f}% ({usdt:+.2f} USDT)  "
+            f"SL={p.stop_loss:,.6f} TP={p.take_profit:,.6f}  {dur}dk"
+        )
+    lines.append(f"   ───── Toplam açık (gerçekleşmemiş): {total_usdt:+.2f} USDT ─────")
+    log.info("\n".join(lines))
+    return total_usdt
+
+
 def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, allow_entry: bool = True, balance: float = 0.0):
     cfg = CONFIG
     price = fetch_current_price(ex, symbol)
@@ -1591,11 +1625,14 @@ def main():
             run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos, allow_entry, current_balance)
             time.sleep(0.5)
 
+        # Açık pozisyonları ve gerçekleşmemiş PnL'leri göster
+        open_usdt = log_open_positions(ex, positions)
+
         open_c = count_open(positions)
         wr = pnl_tracker.wins / pnl_tracker.total * 100 if pnl_tracker.total else 0
         log.info(
             f"⏳ {cfg['loop_sec']}s bekleniyor...  "
-            f"[Açık: {open_c}/{cfg['max_positions']}  "
+            f"[Açık: {open_c}/{cfg['max_positions']} ({open_usdt:+.2f} USDT)  "
             f"Oturum: {pnl_tracker.session_pnl:+.2f} USDT  "
             f"Günlük: {pnl_tracker.daily_pnl:+.2f} USDT  "
             f"WR: %{wr:.0f} ({pnl_tracker.wins}W/{pnl_tracker.losses}L)]\n"
