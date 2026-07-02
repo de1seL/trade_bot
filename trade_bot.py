@@ -147,8 +147,15 @@ CONFIG = {
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
-    "trade_usdt"          : 10,
+    "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
     "max_positions"       : 2,
+    # #1 Risk-bazlı boyut: her işlemde bakiyenin sabit %'sini riske at (SL mesafesine
+    # göre miktar otomatik ayarlanır → SL %1.2 de olsa %3 de olsa kayıp AYNI).
+    "risk_based_sizing"   : True,
+    "risk_per_trade_pct"  : 2.0,          # her işlemde bakiyenin %2'si riskte (SL vurursa)
+    # #2 Üst üste zarar freni: N zarar arka arkaya → M saat yeni işlem yok (whipsaw kesici)
+    "consec_loss_limit"   : 3,
+    "consec_loss_pause_hours": 2,
     "daily_loss_enabled"  : True,         # günlük zarar freni AÇIK
     "daily_loss_pct"      : 15.0,         # günlük -%15'e ulaşınca dur (1 saat)
     "daily_profit_target_pct": 20.0,
@@ -213,6 +220,7 @@ class PnLTracker:
         self.total       = 0
         self.wins        = 0
         self.losses      = 0
+        self.consecutive_losses = 0   # #2 üst üste zarar sayacı (kazançta sıfırlanır)
 
     def _roll_day_if_needed(self):
         if date.today() != self.daily_date:
@@ -227,8 +235,10 @@ class PnLTracker:
         self.daily_pnl += pnl_usdt
         if pnl_pct >= 0:
             self.wins += 1
+            self.consecutive_losses = 0        # kazanç → seriyi sıfırla
         else:
             self.losses += 1
+            self.consecutive_losses += 1        # zarar → seriyi artır
         wr = self.wins / self.total * 100 if self.total else 0
         log.info(
             f"📊 PNL | Oturum: {self.session_pnl:+.2f} USDT  "
@@ -950,7 +960,11 @@ class Position:
             f"   Çıkış : {price:,.6f}  Süre: {dur} dk\n"
             f"   PnL   : brüt {pnl_lev:+.2f}%  net {pnl_net:+.2f}%  (maliyet: -{cost:.2f}%)"
         )
-        pnl_tracker.record(pnl_net, cfg["trade_usdt"])
+        # PnL'i GERÇEK marja göre kaydet (risk-bazlı boyutta miktar değişkendir).
+        # margin = notional/leverage = amount*giriş/leverage. Sabit boyutta bu
+        # zaten trade_usdt'ye eşittir → her iki modda da doğru.
+        margin = (self.amount * self.entry_price / cfg["leverage"]) if self.entry_price > 0 else cfg["trade_usdt"]
+        pnl_tracker.record(pnl_net, margin)
 
         cd = cfg["cooldown_sl_sec"] if reason == "STOP_LOSS" else cfg["cooldown_tp_sec"]
         log.info(f"⏸️  [{self.symbol}] Cooldown: {cd//60} dk ({reason})")
@@ -1041,9 +1055,22 @@ def update_exchange_stop(ex, pos) -> bool:
         return False
 
 
-def calc_amount(ex, symbol: str, price: float):
+def calc_amount(ex, symbol: str, price: float, sl_price: float = None, balance: float = None):
     cfg = CONFIG
-    raw = cfg["trade_usdt"] * cfg["leverage"] / price
+    # #1 Risk-bazlı boyut: miktarı SL mesafesine göre ayarla → SL vurursa kayıp
+    # tam olarak bakiyenin risk_per_trade_pct'i olur (SL dar/geniş fark etmez).
+    if cfg.get("risk_based_sizing") and sl_price and balance and balance > 0:
+        sl_dist = abs(price - sl_price)
+        if sl_dist <= 0:
+            return None
+        risk_usdt = balance * cfg["risk_per_trade_pct"] / 100.0
+        raw = risk_usdt / sl_dist            # amount × sl_dist = risk_usdt (kayıp)
+        # Güvenlik: gerekli marj (notional/kaldıraç) bakiyenin yarısını aşmasın
+        max_margin = balance * 0.5
+        if raw * price / cfg["leverage"] > max_margin:
+            raw = max_margin * cfg["leverage"] / price
+    else:
+        raw = cfg["trade_usdt"] * cfg["leverage"] / price
     if cfg["dry_run"]:
         return round(raw, 6)
     try:
@@ -1349,7 +1376,7 @@ def count_open(positions: dict) -> int:
     return sum(1 for p in positions.values() if p.active)
 
 
-def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, allow_entry: bool = True):
+def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, allow_entry: bool = True, balance: float = 0.0):
     cfg = CONFIG
     price = fetch_current_price(ex, symbol)
     if price is None:
@@ -1431,7 +1458,9 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
         log_scan(symbol, trend, entry, signal, pos, daily, entry_trend)
 
         if signal in ("LONG", "SHORT"):
-            amount = calc_amount(ex, symbol, price)
+            # Risk-bazlı boyut için önce SL'i hesapla (pos.open ile AYNI formül)
+            sl_pre, _ = compute_sltp(price, entry["atr"], signal)
+            amount = calc_amount(ex, symbol, price, sl_pre, balance)
             if amount is None:
                 pass
             elif not spread_ok(ex, symbol, cfg["max_spread_pct"]):
@@ -1473,6 +1502,11 @@ def main():
         _scan_mode = f"{len(cfg.get('core_symbols', []))} ana + saatlik top {cfg['top_volatile_count']} volatil"
     log.info(f"  Coinler    : {len(symbols)} coin — {_scan_mode}  (max {cfg['max_positions']} pozisyon)")
     log.info(f"  Kaldıraç   : {cfg['leverage']}x")
+    if cfg.get("risk_based_sizing"):
+        log.info(f"  Boyut      : risk-bazlı — her işlemde bakiyenin %{cfg['risk_per_trade_pct']}'i riskte")
+    else:
+        log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
+    log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
     log.info(f"  Min Koşul  : {cfg['min_conditions']}/6 koşul + zorunlu tetik (EMA9/20/50 eklendi)")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
@@ -1520,6 +1554,14 @@ def main():
             pause_day   = date.today()
             log.info(f"🎯 Günlük +%{cfg['daily_profit_target_pct']:.0f} hedefe ulaşıldı → "
                      f"{cfg['profit_pause_hours']} saat YENİ işlem YOK (açık pozisyonlar yönetiliyor)")
+
+        # #2 Üst üste zarar freni: N zarar arka arkaya → M saat mola (whipsaw kesici)
+        if pnl_tracker.consecutive_losses >= cfg["consec_loss_limit"]:
+            pause_until = max(pause_until, time.time() + cfg["consec_loss_pause_hours"] * 3600)
+            log.warning(f"🧊 {pnl_tracker.consecutive_losses} üst üste zarar → "
+                        f"{cfg['consec_loss_pause_hours']} saat YENİ işlem YOK (whipsaw freni)")
+            pnl_tracker.consecutive_losses = 0   # sıfırla ki tekrar tetiklemesin
+
         allow_entry = time.time() >= pause_until
 
         if not cfg["symbols"] and time.time() - last_refresh > cfg["symbol_refresh_sec"]:
@@ -1546,7 +1588,7 @@ def main():
             log.info(f"🎯 Kâr hedefi molası: {mins} dk daha yeni işlem yok (açık pozisyonlar yönetiliyor)")
 
         for sym in symbols:
-            run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos, allow_entry)
+            run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos, allow_entry, current_balance)
             time.sleep(0.5)
 
         open_c = count_open(positions)
