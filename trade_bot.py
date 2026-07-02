@@ -126,6 +126,10 @@ CONFIG = {
     "vol_period"          : 20,
     "vol_mult"            : 1.0,
 
+    # ── Bollinger Bands (1h) — volatilite/kırılım (6. koşul) ─
+    "bb_period"           : 20,
+    "bb_std"              : 2.0,          # kaç standart sapma (klasik 2.0)
+
     # ── ATR & SL/TP (1h) ─────────────────────────────────────
     "atr_period"          : 14,
     "atr_sl_mult"         : 1.3,         # SL'i 1h gürültüsünün DIŞINA koy (eski 0.8 çok dardı)
@@ -680,6 +684,12 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     ).average_true_range()
     df["vol_ma"] = df["volume"].rolling(cfg["vol_period"]).mean()
 
+    # Bollinger Bands (volatilite/kırılım) — 6. koşul
+    bb = ta.volatility.BollingerBands(df["close"], window=cfg["bb_period"], window_dev=cfg["bb_std"])
+    df["bb_up"]  = bb.bollinger_hband()
+    df["bb_lo"]  = bb.bollinger_lband()
+    df["bb_mid"] = bb.bollinger_mavg()
+
     last  = df.iloc[-1]
     prev  = df.iloc[-2]
     price = float(last["close"])
@@ -688,7 +698,7 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     coin_chg_1h = (price - float(prev["close"])) / float(prev["close"])
 
     # NaN Koruması
-    for col in ["sk","sd","macd","msig","st","atr","vol_ma","rsi"]:
+    for col in ["sk","sd","macd","msig","st","atr","vol_ma","rsi","bb_up","bb_lo"]:
         if pd.isna(last[col]):
             return None
 
@@ -726,10 +736,15 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     st_short = int(last["std"]) == -1
     vol_ok   = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
 
-    # Skor: StochRSI + RSI + MACD + Hacim + ST (5 koşul; OBV kaldırıldı — perp'te
-    # zayıf/yanıltıcı ve EMA trendiyle zaten örtüşüyordu)
-    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long])
-    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short])
+    # Bollinger kırılımı (volatilite): fiyat üst bandı aştı → yukarı genişleme;
+    # alt bandı deldi → aşağı genişleme. Trendle UYUMLU kırılım teyidi.
+    bb_up_lvl = float(last["bb_up"]); bb_lo_lvl = float(last["bb_lo"])
+    bb_long  = price > bb_up_lvl
+    bb_short = price < bb_lo_lvl
+
+    # Skor: StochRSI + RSI + MACD + Hacim + ST + Bollinger (6 koşul)
+    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long,  bb_long])
+    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short, bb_short])
 
     # TETİK = taze zamanlama olayı (durum koşulu değil). Girişi geç/uzamış
     # hareketten korur. MACD crossover ya da StochRSI momentum dönüşü.
@@ -757,6 +772,10 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
         "vol_ok"      : vol_ok,
         "volume"      : float(last["volume"]),
         "vol_ma"      : float(last["vol_ma"]),
+        "bb_up"       : round(bb_up_lvl, 6),
+        "bb_lo"       : round(bb_lo_lvl, 6),
+        "bb_long"     : bb_long,
+        "bb_short"    : bb_short,
         "long_score"  : long_score,
         "short_score" : short_score,
         "long_trigger"  : long_trigger,
@@ -1412,10 +1431,11 @@ def log_scan(sym, trend, entry, signal, pos, daily, trend_1h="NONE"):
         f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}\n"
         f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}\n"
         f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}\n"
-        f"  LONG ({entry['long_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
-        f"  SHORT({entry['short_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
+        f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}\n"
+        f"  LONG ({entry['long_score']}/6, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])} BB{t(entry['bb_long'])}\n"
+        f"  SHORT({entry['short_score']}/6, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])} BB{t(entry['bb_short'])}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -1574,7 +1594,7 @@ def main():
     log.info(f"  Coinler    : {len(symbols)} coin — {_scan_mode}  (max {cfg['max_positions']} pozisyon)")
     log.info(f"  Kaldıraç   : {cfg['leverage']}x")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/6 koşul + zorunlu tetik")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']}")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
     log.info(f"  Zarar Lim  : {('%'+str(cfg['daily_loss_pct'])) if cfg.get('daily_loss_enabled', False) else 'KAPALI'}")
