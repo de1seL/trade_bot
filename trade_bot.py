@@ -157,8 +157,8 @@ CONFIG = {
     "max_positions"       : 2,
     # #1 Risk-bazlı boyut: her işlemde bakiyenin sabit %'sini riske at (SL mesafesine
     # göre miktar otomatik ayarlanır → SL %1.2 de olsa %3 de olsa kayıp AYNI).
-    "risk_based_sizing"   : True,
-    "risk_per_trade_pct"  : 2.0,          # her işlemde bakiyenin %2'si riskte (SL vurursa)
+    "risk_based_sizing"   : False,        # KAPALI → sabit boyut (aşağıdaki trade_usdt)
+    "risk_per_trade_pct"  : 2.0,          # (sadece risk_based_sizing True iken geçerli)
     # #2 Üst üste zarar freni: N zarar arka arkaya → M saat yeni işlem yok (whipsaw kesici)
     "consec_loss_limit"   : 3,
     "consec_loss_pause_hours": 2,
