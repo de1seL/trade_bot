@@ -138,7 +138,19 @@ def evaluate(ex, symbol: str, btc_chg: float):
         if entry is None:
             return None
         entry_trend = tb.calc_entry_trend(df1h)   # trade_bot'ta calc_1h_trend → calc_entry_trend
-        signal      = tb.get_signal(trend, entry, daily, btc_chg, entry_trend)
+
+        # Alt zaman dilimi teyidi (5m + 15m) — trade_bot ile aynı
+        tf5 = tf15 = "NONE"
+        if CONFIG.get("ltf_confirm_enabled", True):
+            try:
+                df5  = tb.fetch_ohlcv(ex, symbol, "5m",  limit=120).iloc[:-1].copy()
+                df15 = tb.fetch_ohlcv(ex, symbol, "15m", limit=120).iloc[:-1].copy()
+                tf5  = tb.tf_trend(df5)
+                tf15 = tb.tf_trend(df15)
+            except Exception:
+                pass
+
+        signal      = tb.get_signal(trend, entry, daily, btc_chg, entry_trend, tf5, tf15)
         return {"price": price, "atr": entry["atr"], "signal": signal}
     except Exception as e:
         log.warning(f"⚠️  [{symbol}] değerlendirilemedi, atlanıyor: {e}")

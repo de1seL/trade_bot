@@ -129,6 +129,12 @@ CONFIG = {
     "ema20_period"        : 20,
     "ema50_period"        : 50,
 
+    # ── Alt zaman dilimi teyidi (5m + 15m) ──────────────────
+    # 1h yönü ile 5m VE 15m'in İKİSİ birden ters ise giriş yapma (düşen bıçak koruması).
+    "ltf_confirm_enabled" : True,
+    "ltf_ema_fast"        : 9,             # 5m/15m kısa-vade yönü: EMA9 vs EMA21
+    "ltf_ema_slow"        : 21,
+
     # ── ATR & SL/TP (entry_tf) ──────────────────────────────
     "atr_period"          : 14,
     "atr_sl_mult"         : 1.3,
@@ -759,8 +765,21 @@ def calc_entry_trend(df: pd.DataFrame) -> str:
     return "NONE"
 
 
+def tf_trend(df: pd.DataFrame) -> str:
+    """Bir zaman diliminin kısa-vade yönü: EMA fast vs slow. LONG/SHORT/NONE.
+    Alt zaman dilimi (5m/15m) teyidi için kullanılır."""
+    cfg = CONFIG
+    ef = ta.trend.EMAIndicator(df["close"], window=cfg["ltf_ema_fast"]).ema_indicator()
+    es = ta.trend.EMAIndicator(df["close"], window=cfg["ltf_ema_slow"]).ema_indicator()
+    if pd.isna(ef.iloc[-1]) or pd.isna(es.iloc[-1]):
+        return "NONE"
+    if   float(ef.iloc[-1]) > float(es.iloc[-1]): return "LONG"
+    elif float(ef.iloc[-1]) < float(es.iloc[-1]): return "SHORT"
+    return "NONE"
+
+
 def get_signal(trend: dict, entry: dict, daily: str, btc_chg: float = 0.0,
-               entry_trend: str = "NONE") -> str:
+               entry_trend: str = "NONE", tf5: str = "NONE", tf15: str = "NONE") -> str:
     cfg = CONFIG
     d   = trend["direction"]
 
@@ -776,6 +795,13 @@ def get_signal(trend: dict, entry: dict, daily: str, btc_chg: float = 0.0,
     if cfg.get("bb_filter_enabled", True):
         if d == "LONG"  and entry.get("bb_over_long"):  return "HOLD"
         if d == "SHORT" and entry.get("bb_over_short"): return "HOLD"
+
+    # Alt zaman dilimi teyidi: 1h yönü ile 5m VE 15m'in İKİSİ birden ters ise girme.
+    # (1h yükselirken 5m+15m düşüyorsa = düşen bıçağı yakalama → engelle; tersi de.)
+    if cfg.get("ltf_confirm_enabled", True):
+        opp = "SHORT" if d == "LONG" else "LONG"
+        if tf5 == opp and tf15 == opp:
+            return "HOLD"
 
     # 1d & 4h uyumu
     if daily != "NONE" and daily != d: return "HOLD"
@@ -1487,7 +1513,19 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
             return
 
         entry_trend = calc_entry_trend(df1h)
-        signal   = get_signal(trend, entry, daily, btc_chg, entry_trend)
+
+        # Alt zaman dilimi teyidi (5m + 15m) — ters yönde giriş engellenir
+        tf5 = tf15 = "NONE"
+        if cfg.get("ltf_confirm_enabled", True):
+            try:
+                df5  = fetch_ohlcv_cached(ex, symbol, "5m",  120, 60).iloc[:-1].copy()
+                df15 = fetch_ohlcv_cached(ex, symbol, "15m", 120, 120).iloc[:-1].copy()
+                tf5  = tf_trend(df5)
+                tf15 = tf_trend(df15)
+            except Exception:
+                pass
+
+        signal   = get_signal(trend, entry, daily, btc_chg, entry_trend, tf5, tf15)
 
         log_scan(symbol, trend, entry, signal, pos, daily, entry_trend)
 
