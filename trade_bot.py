@@ -398,6 +398,23 @@ def ensure_leverage(ex: ccxt.Exchange, symbol: str, leverage: int) -> bool:
 STABLE   = {"USDT","BUSD","USDC","DAI","TUSD","FDUSD","USDP","UST"}
 FALLBACK = ["SOL/USDT:USDT","XRP/USDT:USDT","DOGE/USDT:USDT","AVAX/USDT:USDT","LINK/USDT:USDT"]
 
+# Binance TradFi-Perps (tokenize HİSSE/ETF) — KRİPTO DEĞİL. V-toparlar/gap yapar,
+# bu trend-takip stratejisi için uygun değil (dip'te short'a yakalanılır) ve
+# sözleşme (agreement) ister. Taramadan tamamen çıkarılır.
+STOCK_BASES = {
+    "AMD","SNDK","EWY","AAPL","TSLA","NVDA","MSFT","GOOGL","GOOG","AMZN","META",
+    "COIN","MSTR","HOOD","PLTR","SMCI","NFLX","INTC","MU","QCOM","CRCL","NU","AVGO",
+    "ORCL","BABA","DIS","BA","JPM","MARA","RIOT","SPY","QQQ","GLD","NKE","PYPL",
+    "UBER","ABNB","SHOP","SOFI","GME","AMC","F","T","KO","PEP","WMT","COST",
+}
+
+def _is_stock_perp(m: dict) -> bool:
+    """Tokenize hisse / TradFi-Perp mi? (kripto değil → taramadan çıkar)"""
+    ut = str((m.get("info") or {}).get("underlyingType", "")).upper()
+    if ut and ut != "COIN":              # kripto = COIN; hisse/endeks != COIN
+        return True
+    return str(m.get("base", "")).upper() in STOCK_BASES
+
 
 def _listed_long_enough(m: dict, now_ms: int, min_age_ms: int) -> bool:
     if min_age_ms <= 0:
@@ -451,6 +468,7 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         and m.get("active") and m.get("quote") == "USDT"
         and m.get("base") not in STABLE
         and m.get("base") not in exclude
+        and not _is_stock_perp(m)                        # tokenize hisse/ETF'leri ele
         and _listed_long_enough(m, now_ms, min_age_ms)
     }
 
