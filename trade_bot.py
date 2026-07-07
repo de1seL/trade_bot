@@ -18,7 +18,7 @@
     EMA20 > EMA50 → yukarı momentum (LONG)
     EMA20 < EMA50 → aşağı momentum (SHORT)
 
-  KATMAN 4 — GİRİŞ (15 dakika, min koşul + ZORUNLU taze tetik)
+  KATMAN 4 — GİRİŞ (1 saat, min koşul + ZORUNLU taze tetik)
     Skor koşulları (6): StochRSI dönüş, RSI momentum, MACD crossover,
                         Hacim artışı, Süper Trend yönü, EMA9/20/50 hizalama
     Tetik (≥1 şart): MACD crossover VEYA StochRSI dönüşü
@@ -81,7 +81,7 @@ CONFIG = {
     # ── Zaman dilimleri ─────────────────────────────────────
     "daily_tf"            : "1d",
     "trend_tf"            : "4h",
-    "entry_tf"            : "15m",          # 5m çok gürültülüydü → 15m (sıkı trend-takibi için uygun)
+    "entry_tf"            : "1h",           # 1 saat — en az gürültü, sıkı trend-takibi için en uygun
 
     # ── Trend (4h) ───────────────────────────────────────────
     "ema_trend"           : 200,
@@ -173,7 +173,7 @@ CONFIG = {
     # ── OHLCV cache ──────────────────────────────────────────
     "cache_1d_sec"        : 3600,
     "cache_4h_sec"        : 900,
-    "cache_1h_sec"        : 60,           # entry_tf (15m) için cache
+    "cache_1h_sec"        : 60,           # entry_tf (1h) için cache
 
     # ── Komisyon ─────────────────────────────────────────────
     "commission"          : 0.0004,
@@ -779,7 +779,7 @@ def get_signal(trend: dict, entry: dict, daily: str, btc_chg: float = 0.0,
 
     # 1d & 4h uyumu
     if daily != "NONE" and daily != d: return "HOLD"
-    # entry_tf (15m) EMA hizalaması ters ise 1 ekstra koşul iste
+    # entry_tf (1h) EMA hizalaması ters ise 1 ekstra koşul iste
     min_c = cfg["min_conditions"]
     if entry_trend != "NONE" and entry_trend != d:
         min_c += 1
