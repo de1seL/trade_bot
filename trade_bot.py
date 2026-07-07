@@ -42,9 +42,12 @@
 """
 
 import os
+import csv
 import time
 import logging
-from datetime import date
+import urllib.parse
+import urllib.request
+from datetime import date, datetime
 
 import ccxt
 import numpy as np
@@ -53,6 +56,9 @@ import ta
 from dotenv import load_dotenv
 
 load_dotenv()
+
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ─────────────────────────────────────────────────────────────
 # AYARLAR
@@ -195,6 +201,10 @@ CONFIG = {
     "roi_tp_enabled"      : False,
     "roi_tp_pct"          : 0.035,
 
+    # ── İşlem günlüğü & Bildirim ─────────────────────────────
+    "trade_log_csv"       : "trades.csv",  # her kapanan işlem buraya yazılır (Excel'de aç)
+    "notify_telegram"     : True,          # aç/kapa/hata/mola bildirimi (.env'de token gerekli)
+
     # ── Sistem ───────────────────────────────────────────────
     "loop_sec"            : 15,
     "dry_run"             : False,
@@ -213,6 +223,47 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────
+# TELEGRAM BİLDİRİM & İŞLEM GÜNLÜĞÜ
+# ─────────────────────────────────────────────────────────────
+
+def notify(text: str):
+    """Telegram'a bildirim gönderir (token yoksa ya da kapalıysa sessizce geçer)."""
+    if not CONFIG.get("notify_telegram") or not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        data = urllib.parse.urlencode({
+            "chat_id": TELEGRAM_CHAT_ID, "text": text,
+            "parse_mode": "HTML", "disable_web_page_preview": "true",
+        }).encode()
+        urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10)
+    except Exception as e:
+        log.warning(f"⚠️  Telegram bildirimi gönderilemedi: {e}")
+
+
+_TRADE_LOG_FIELDS = [
+    "time", "symbol", "side", "entry", "exit", "pnl_net_pct", "pnl_usdt",
+    "reason", "dur_min", "leverage",
+    "adx", "daily", "tf1h", "tf5", "tf15",
+    "score", "stoch", "rsi", "macd", "vol", "st", "ema",
+]
+
+def write_trade_log(row: dict):
+    """Kapanan bir işlemi trades.csv'ye ekler (yoksa başlık satırıyla oluşturur)."""
+    path = CONFIG.get("trade_log_csv")
+    if not path:
+        return
+    try:
+        exists = os.path.isfile(path)
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=_TRADE_LOG_FIELDS)
+            if not exists:
+                w.writeheader()
+            w.writerow({k: row.get(k, "") for k in _TRADE_LOG_FIELDS})
+    except Exception as e:
+        log.warning(f"⚠️  İşlem günlüğü yazılamadı: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # PNL TRACKER
@@ -844,6 +895,7 @@ class Position:
         self.amount         = 0.0
         self.risk_pct       = 0.0
         self.exchange_sl    = 0.0
+        self.entry_snapshot = {}      # giriş anındaki koşullar (CSV günlüğü için)
         self.open_time      = None
         self.cooldown_until = None
 
@@ -989,8 +1041,45 @@ class Position:
         # PnL'i GERÇEK marja göre kaydet (risk-bazlı boyutta miktar değişkendir).
         # margin = notional/leverage = amount*giriş/leverage. Sabit boyutta bu
         # zaten trade_usdt'ye eşittir → her iki modda da doğru.
-        margin = (self.amount * self.entry_price / cfg["leverage"]) if self.entry_price > 0 else cfg["trade_usdt"]
+        margin  = (self.amount * self.entry_price / cfg["leverage"]) if self.entry_price > 0 else cfg["trade_usdt"]
+        pnl_usdt = margin * pnl_net / 100
         pnl_tracker.record(pnl_net, margin)
+
+        # ── İşlem günlüğü (CSV) ──
+        sn = self.entry_snapshot or {}
+        write_trade_log({
+            "time"       : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol"     : self.symbol.split("/")[0],
+            "side"       : self.side,
+            "entry"      : self.entry_price,
+            "exit"       : round(price, 6),
+            "pnl_net_pct": round(pnl_net, 2),
+            "pnl_usdt"   : round(pnl_usdt, 2),
+            "reason"     : reason,
+            "dur_min"    : dur,
+            "leverage"   : cfg["leverage"],
+            "adx"        : sn.get("adx", ""),
+            "daily"      : sn.get("daily", ""),
+            "tf1h"       : sn.get("tf1h", ""),
+            "tf5"        : sn.get("tf5", ""),
+            "tf15"       : sn.get("tf15", ""),
+            "score"      : sn.get("score", ""),
+            "stoch"      : sn.get("stoch", ""),
+            "rsi"        : sn.get("rsi", ""),
+            "macd"       : sn.get("macd", ""),
+            "vol"        : sn.get("vol", ""),
+            "st"         : sn.get("st", ""),
+            "ema"        : sn.get("ema", ""),
+        })
+
+        # ── Telegram bildirimi ──
+        coin = self.symbol.split("/")[0]
+        notify(
+            f"{emoji} <b>{coin} {self.side} KAPANDI</b> [{reason}]\n"
+            f"Giriş {self.entry_price:g} → Çıkış {price:g}\n"
+            f"PnL: {pnl_net:+.2f}% ({pnl_usdt:+.2f} USDT)  Süre: {dur}dk\n"
+            f"Günlük: {pnl_tracker.daily_pnl:+.2f} USDT"
+        )
 
         cd = cfg["cooldown_sl_sec"] if reason == "STOP_LOSS" else cfg["cooldown_tp_sec"]
         log.info(f"⏸️  [{self.symbol}] Cooldown: {cd//60} dk ({reason})")
@@ -1541,11 +1630,33 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
                 pass
             else:
                 pos.open(signal, price, entry["atr"], amount)
+                # Giriş anındaki koşulları sakla (CSV günlüğü için)
+                L = signal == "LONG"
+                pos.entry_snapshot = {
+                    "adx": trend["adx"], "daily": daily, "tf1h": entry_trend, "tf5": tf5, "tf15": tf15,
+                    "score": entry["long_score"] if L else entry["short_score"],
+                    "stoch": entry["stoch_long"] if L else entry["stoch_short"],
+                    "rsi":   entry["rsi_long"]   if L else entry["rsi_short"],
+                    "macd":  entry["macd_up"]    if L else entry["macd_down"],
+                    "vol":   entry["vol_ok"],
+                    "st":    entry["st_long"]    if L else entry["st_short"],
+                    "ema":   entry["ema_long_ok"] if L else entry["ema_short_ok"],
+                }
                 ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
                 if not ok:
                     log.warning(f"⚠️  [{symbol}] Emir başarısız, pozisyon hafızadan siliniyor")
                     pos.active = False
                     pos.side = None
+                else:
+                    coin = symbol.split("/")[0]
+                    sl_pct = abs(price - pos.stop_loss) / price * 100
+                    tp_pct = abs(price - pos.take_profit) / price * 100
+                    notify(
+                        f"{'🟢' if L else '🔴'} <b>{coin} {signal} AÇILDI</b>\n"
+                        f"Giriş: {price:g}\n"
+                        f"SL: {pos.stop_loss:g} (-%{sl_pct:.2f})  TP: {pos.take_profit:g} (+%{tp_pct:.2f})\n"
+                        f"Kaldıraç: {cfg['leverage']}x"
+                    )
 
     except ccxt.NetworkError as e:
         log.warning(f"🌐 [{symbol}] Ağ: {e}")
@@ -1553,6 +1664,7 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
         log.error(f"🏦 [{symbol}] Borsa: {e}")
     except Exception as e:
         log.exception(f"💥 [{symbol}] Hata: {e}")
+        notify(f"💥 <b>{symbol.split('/')[0]} HATA</b>: {str(e)[:200]}")
 
 
 def main():
@@ -1590,6 +1702,12 @@ def main():
         log.info(f"  ROI TP     : +%{cfg['roi_tp_pct']*100:.1f} kaldıraçlı kârda anında kapat (aktif)")
     log.info(f"  Mod        : {'🧪 DRY RUN' if cfg['dry_run'] else '💰 CANLI'}")
     log.info("=" * 54)
+    notify(
+        f"🤖 <b>Bot başladı</b>\n"
+        f"Bakiye: {START_BALANCE:.2f} USDT  Kaldıraç: {cfg['leverage']}x\n"
+        f"{len(symbols)} coin  Max {cfg['max_positions']} pozisyon\n"
+        f"Mod: {'🧪 DRY RUN' if cfg['dry_run'] else '💰 CANLI'}"
+    )
 
     positions = {}
     for sym in symbols:
@@ -1618,6 +1736,7 @@ def main():
 
         if cfg.get("daily_loss_enabled", False) and pnl_tracker.daily_limit_hit(current_balance):
             log.warning("💤 Günlük zarar limiti → 1 saat bekleniyor...")
+            notify(f"🛑 <b>Günlük zarar limiti (-%{cfg['daily_loss_pct']:.0f})</b> → 1 saat mola. Günlük: {pnl_tracker.daily_pnl:+.2f} USDT")
             time.sleep(3600)
             continue
 
@@ -1626,12 +1745,14 @@ def main():
             pause_day   = date.today()
             log.info(f"🎯 Günlük +%{cfg['daily_profit_target_pct']:.0f} hedefe ulaşıldı → "
                      f"{cfg['profit_pause_hours']} saat YENİ işlem YOK (açık pozisyonlar yönetiliyor)")
+            notify(f"🎯 <b>Günlük +%{cfg['daily_profit_target_pct']:.0f} hedef!</b> {cfg['profit_pause_hours']}s yeni işlem yok. Günlük: {pnl_tracker.daily_pnl:+.2f} USDT")
 
         # #2 Üst üste zarar freni: N zarar arka arkaya → M saat mola (whipsaw kesici)
         if pnl_tracker.consecutive_losses >= cfg["consec_loss_limit"]:
             pause_until = max(pause_until, time.time() + cfg["consec_loss_pause_hours"] * 3600)
             log.warning(f"🧊 {pnl_tracker.consecutive_losses} üst üste zarar → "
                         f"{cfg['consec_loss_pause_hours']} saat YENİ işlem YOK (whipsaw freni)")
+            notify(f"🧊 <b>{pnl_tracker.consecutive_losses} üst üste zarar</b> → {cfg['consec_loss_pause_hours']}s yeni işlem yok (whipsaw freni)")
             pnl_tracker.consecutive_losses = 0   # sıfırla ki tekrar tetiklemesin
 
         allow_entry = time.time() >= pause_until
