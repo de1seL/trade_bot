@@ -161,6 +161,9 @@ CONFIG = {
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
     "max_positions"       : 2,
+    # Korelasyon koruması: aynı YÖNDE en fazla kaç pozisyon. 1 → en fazla 1 LONG + 1 SHORT
+    # (2 alt coin aynı yönde = aslında tek büyük bahis; BTC dönerse ikisi birden batar).
+    "max_per_direction"   : 1,
     # #1 Risk-bazlı boyut: her işlemde bakiyenin sabit %'sini riske at (SL mesafesine
     # göre miktar otomatik ayarlanır → SL %1.2 de olsa %3 de olsa kayıp AYNI).
     "risk_based_sizing"   : False,        # KAPALI → sabit boyut (aşağıdaki trade_usdt)
@@ -1509,6 +1512,11 @@ def count_open(positions: dict) -> int:
     return sum(1 for p in positions.values() if p.active)
 
 
+def count_open_side(positions: dict, side: str) -> int:
+    """Belirli YÖNDE (LONG/SHORT) açık pozisyon sayısı — korelasyon koruması için."""
+    return sum(1 for p in positions.values() if p.active and p.side == side)
+
+
 def log_open_positions(ex, positions: dict) -> float:
     """Açık pozisyonları ve gerçekleşmemiş (unrealized) PnL'lerini gösterir.
     Toplam açık USDT PnL'i döner."""
@@ -1640,8 +1648,11 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
             # Risk-bazlı boyut için önce SL'i hesapla (pos.open ile AYNI formül)
             sl_pre, _ = compute_sltp(price, entry["atr"], signal)
             amount = calc_amount(ex, symbol, price, sl_pre, balance)
+            _mpd = cfg.get("max_per_direction", 0)
             if amount is None:
                 pass
+            elif _mpd and count_open_side(positions, signal) >= _mpd:
+                log.info(f"⚖️  [{symbol}] Aynı yönde ({signal}) zaten pozisyon var → korelasyon koruması, atla")
             elif not spread_ok(ex, symbol, cfg["max_spread_pct"]):
                 pass
             elif not ensure_leverage(ex, symbol, cfg["leverage"]):
