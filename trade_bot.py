@@ -75,7 +75,7 @@ CONFIG = {
         "DOT/USDT:USDT",
     ],
     "top_volatile_count"  : 40,
-    "symbol_refresh_sec"  : 3600,
+    "symbol_refresh_sec"  : 900,          # coin listesini 15 dk'da bir yenile (paralel)
 
     # ── Tarama filtreleri ───────────────────────────────────
     "exclude_bases"       : ["BTC", "BNB"],
@@ -165,10 +165,16 @@ CONFIG = {
     # Korelasyon koruması: aynı YÖNDE en fazla kaç pozisyon. 1 → en fazla 1 LONG + 1 SHORT
     # (2 alt coin aynı yönde = aslında tek büyük bahis; BTC dönerse ikisi birden batar).
     "max_per_direction"   : 1,
-    # #1 Risk-bazlı boyut: her işlemde bakiyenin sabit %'sini riske at (SL mesafesine
-    # göre miktar otomatik ayarlanır → SL %1.2 de olsa %3 de olsa kayıp AYNI).
-    "risk_based_sizing"   : False,        # KAPALI → sabit boyut (aşağıdaki trade_usdt)
-    "risk_per_trade_pct"  : 2.0,          # (sadece risk_based_sizing True iken geçerli)
+    # ── Para yönetimi (DİNAMİK) ──────────────────────────────
+    # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
+    # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
+    "dynamic_leverage"    : True,
+    "position_pct"        : 0.20,         # her pozisyon marjı = bakiyenin %20'si
+    "total_exposure_pct"  : 0.40,         # tüm açık pozisyonların marjı ≤ bakiyenin %40'ı
+    "risk_per_trade_pct"  : 2.0,          # hedef risk: SL vurursa ~bakiyenin %2'si
+    "min_leverage"        : 5,            # kaldıraç alt sınırı
+    "max_leverage"        : 20,           # kaldıraç üst sınırı
+    "risk_based_sizing"   : False,        # eski mod (dynamic_leverage KAPALIYKEN)
     # #2 Üst üste zarar freni: N zarar arka arkaya → M saat yeni işlem yok (whipsaw kesici)
     "consec_loss_limit"   : 3,
     "consec_loss_pause_hours": 2,
@@ -504,7 +510,9 @@ def get_symbols(ex: ccxt.Exchange, top_n: int) -> list[str]:
         return FALLBACK
 
     df = pd.DataFrame(rows).sort_values("score", ascending=False)
-    ranked = filter_min_leverage(ex, df["symbol"].tolist(), CONFIG["leverage"])
+    # Coin en az kaldıraç tabanımızı desteklemeli (dinamik modda min_leverage)
+    _need_lev = CONFIG.get("min_leverage", CONFIG["leverage"]) if CONFIG.get("dynamic_leverage") else CONFIG["leverage"]
+    ranked = filter_min_leverage(ex, df["symbol"].tolist(), _need_lev)
     df = df[df["symbol"].isin(ranked)]
     df = df.sort_values("score", ascending=False).head(top_n)
     if df.empty:
@@ -560,6 +568,32 @@ def fetch_ohlcv_cached(ex, symbol: str, tf: str, limit: int, ttl: float) -> pd.D
     df = fetch_ohlcv(ex, symbol, tf, limit)
     _OHLCV_CACHE[key] = (now, df)
     return df
+
+
+def prefetch_ohlcv(ex, symbols: list):
+    """Aday coinlerin TÜM zaman dilimi mumlarını 5 thread ile PARALEL çekip cache'i
+    ısıtır. Read-only → güvenli (emir yok, state değişmez). Sonraki sıralı döngü
+    cache'ten okuduğu için çok hızlanır. Sadece VERİ çekme paralel; emirler sıralı."""
+    if not symbols:
+        return
+    cfg  = CONFIG
+    jobs = []
+    for s in symbols:
+        jobs.append((s, cfg["daily_tf"], 260, cfg["cache_1d_sec"]))
+        jobs.append((s, cfg["trend_tf"], 250, cfg["cache_4h_sec"]))
+        jobs.append((s, cfg["entry_tf"], 300, cfg["cache_1h_sec"]))
+        jobs.append((s, "5m",  120, 60))
+        jobs.append((s, "15m", 120, 120))
+    def _one(j):
+        try:
+            fetch_ohlcv_cached(ex, j[0], j[1], j[2], j[3])
+        except Exception:
+            pass
+    try:
+        with ThreadPoolExecutor(max_workers=cfg.get("scan_workers", 5)) as pool:
+            list(pool.map(_one, jobs))
+    except Exception as e:
+        log.warning(f"⚠️  Paralel tarama hatası (sıralı devam): {e}")
 
 
 def prefetch_ohlcv(ex, symbols: list[str]):
@@ -955,13 +989,14 @@ class Position:
         self.peak           = 0.0
         self.valley         = 0.0
         self.amount         = 0.0
+        self.leverage       = CONFIG["leverage"]   # bu pozisyonun KENDİ kaldıracı (dinamik)
         self.risk_pct       = 0.0
         self.exchange_sl    = 0.0
         self.entry_snapshot = {}      # giriş anındaki koşullar (CSV günlüğü için)
         self.open_time      = None
         self.cooldown_until = None
 
-    def open(self, side: str, price: float, atr: float, amount: float):
+    def open(self, side: str, price: float, atr: float, amount: float, leverage: int = None):
         cfg  = CONFIG
         cost = (cfg["commission"] + cfg["slippage"]) * 2
 
@@ -991,6 +1026,7 @@ class Position:
         self.entry_price = price
         self.open_time   = time.time()
         self.amount      = amount
+        self.leverage    = int(leverage) if leverage else CONFIG["leverage"]
         self.risk_pct    = abs(price - self.stop_loss) / price
         self.exchange_sl = self.stop_loss
 
@@ -1065,9 +1101,9 @@ class Position:
         if CONFIG.get("roi_tp_enabled", False):
             roi_pct = CONFIG.get("roi_tp_pct", 0.035)
             if self.side == "LONG":
-                profit = (price - self.entry_price) / self.entry_price * CONFIG["leverage"]
+                profit = (price - self.entry_price) / self.entry_price * self.leverage
             else:
-                profit = (self.entry_price - price) / self.entry_price * CONFIG["leverage"]
+                profit = (self.entry_price - price) / self.entry_price * self.leverage
             if profit >= roi_pct:
                 return "ROI_TP"
 
@@ -1079,9 +1115,9 @@ class Position:
             hours_open = (time.time() - self.open_time) / 3600
             if hours_open >= CONFIG["time_profit_hours"]:
                 if self.side == "LONG":
-                    roi = (price - self.entry_price) / self.entry_price * 100 * CONFIG["leverage"]
+                    roi = (price - self.entry_price) / self.entry_price * 100 * self.leverage
                 else:
-                    roi = (self.entry_price - price) / self.entry_price * 100 * CONFIG["leverage"]
+                    roi = (self.entry_price - price) / self.entry_price * 100 * self.leverage
                 if roi >= CONFIG["time_profit_roi_pct"]:
                     return "ZAMAN_KAR"
 
@@ -1101,8 +1137,8 @@ class Position:
         cfg     = CONFIG
         pnl_pct = (price / self.entry_price - 1) * 100 if self.side == "LONG" \
                   else (self.entry_price / price - 1) * 100
-        pnl_lev = pnl_pct * cfg["leverage"]
-        cost    = (cfg["commission"] + cfg["slippage"]) * 2 * 100 * cfg["leverage"]
+        pnl_lev = pnl_pct * self.leverage
+        cost    = (cfg["commission"] + cfg["slippage"]) * 2 * 100 * self.leverage
         pnl_net = pnl_lev - cost
         dur     = int((time.time() - self.open_time) / 60) if self.open_time else 0
         emoji   = "🟢" if pnl_net >= 0 else "🔴"
@@ -1115,7 +1151,7 @@ class Position:
         # PnL'i GERÇEK marja göre kaydet (risk-bazlı boyutta miktar değişkendir).
         # margin = notional/leverage = amount*giriş/leverage. Sabit boyutta bu
         # zaten trade_usdt'ye eşittir → her iki modda da doğru.
-        margin  = (self.amount * self.entry_price / cfg["leverage"]) if self.entry_price > 0 else cfg["trade_usdt"]
+        margin  = (self.amount * self.entry_price / self.leverage) if self.entry_price > 0 else cfg["trade_usdt"]
         pnl_usdt = margin * pnl_net / 100
         pnl_tracker.record(pnl_net, margin)
 
@@ -1131,7 +1167,7 @@ class Position:
             "pnl_usdt"   : round(pnl_usdt, 2),
             "reason"     : reason,
             "dur_min"    : dur,
-            "leverage"   : cfg["leverage"],
+            "leverage"   : self.leverage,
             "adx"        : sn.get("adx", ""),
             "daily"      : sn.get("daily", ""),
             "tf1h"       : sn.get("tf1h", ""),
@@ -1245,23 +1281,30 @@ def update_exchange_stop(ex, pos) -> bool:
 
 
 def calc_amount(ex, symbol: str, price: float, sl_price: float = None, balance: float = None):
+    """Pozisyon boyutu + kaldıracı hesaplar. Döner: (amount, leverage) veya None.
+
+    DİNAMİK MOD (dynamic_leverage):
+      • Marj = bakiyenin position_pct'i (%20). Max 2 pozisyon → toplam %40.
+      • Kaldıraç, risk hedefini (risk_per_trade_pct) tutturacak şekilde:
+            lev = risk% / (position_pct × SL_mesafesi%)   → [min_lev, max_lev] aralığına kırpılır
+        Yani SL dar → yüksek kaldıraç, SL geniş → düşük; risk hep ~%2 (kırpılmadıkça).
+    """
     cfg = CONFIG
-    # #1 Risk-bazlı boyut: miktarı SL mesafesine göre ayarla → SL vurursa kayıp
-    # tam olarak bakiyenin risk_per_trade_pct'i olur (SL dar/geniş fark etmez).
-    if cfg.get("risk_based_sizing") and sl_price and balance and balance > 0:
-        sl_dist = abs(price - sl_price)
+    if cfg.get("dynamic_leverage") and sl_price and balance and balance > 0:
+        sl_dist = abs(price - sl_price) / price          # kesir
         if sl_dist <= 0:
             return None
-        risk_usdt = balance * cfg["risk_per_trade_pct"] / 100.0
-        raw = risk_usdt / sl_dist            # amount × sl_dist = risk_usdt (kayıp)
-        # Güvenlik: gerekli marj (notional/kaldıraç) bakiyenin yarısını aşmasın
-        max_margin = balance * 0.5
-        if raw * price / cfg["leverage"] > max_margin:
-            raw = max_margin * cfg["leverage"] / price
+        margin    = balance * cfg["position_pct"]        # marj = %20 bakiye
+        risk_frac = cfg["risk_per_trade_pct"] / 100.0
+        lev       = risk_frac / (cfg["position_pct"] * sl_dist)
+        leverage  = int(round(max(cfg["min_leverage"], min(cfg["max_leverage"], lev))))
+        raw       = margin * leverage / price
     else:
-        raw = cfg["trade_usdt"] * cfg["leverage"] / price
+        leverage  = int(cfg["leverage"])
+        raw       = cfg["trade_usdt"] * leverage / price
+
     if cfg["dry_run"]:
-        return round(raw, 6)
+        return round(raw, 6), leverage
     try:
         amount = float(ex.amount_to_precision(symbol, raw))
     except Exception:
@@ -1276,16 +1319,12 @@ def calc_amount(ex, symbol: str, price: float, sl_price: float = None, balance: 
         return None
     notional = amount * price
     if min_amt and amount < float(min_amt):
-        need = float(min_amt) * price / cfg["leverage"]
-        log.info(f"⏭️  [{symbol}] Miktar {amount:.6f} < borsa min {min_amt} → ATLANIYOR "
-                 f"(açmak için trade_usdt ≈ {need:.1f}+ olmalı, ya da coini çıkar).")
+        log.info(f"⏭️  [{symbol}] Miktar {amount:.6f} < borsa min {min_amt} → ATLANIYOR (bakiye/marj küçük).")
         return None
     if min_cost and notional < float(min_cost):
-        need = float(min_cost) / cfg["leverage"]
-        log.info(f"⏭️  [{symbol}] Notional {notional:.1f} < borsa min {min_cost} → ATLANIYOR "
-                 f"(trade_usdt ≈ {need:.1f}+ olmalı).")
+        log.info(f"⏭️  [{symbol}] Notional {notional:.1f} < borsa min {min_cost} → ATLANIYOR (bakiye/marj küçük).")
         return None
-    return amount
+    return amount, leverage
 
 
 def fetch_live_positions(ex, symbols):
@@ -1423,6 +1462,10 @@ def reconcile_positions(ex, positions: dict):
             pos.side        = side
             pos.entry_price = entry_price
             pos.amount      = amount
+            try:
+                pos.leverage = int(float(p.get("leverage") or CONFIG["leverage"]))
+            except Exception:
+                pos.leverage = CONFIG["leverage"]
 
             pos.open_time   = _estimate_open_time(ex, sym, side)
             pos.peak        = entry_price
@@ -1518,10 +1561,10 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
     trail_info = ""
     if pos.active:
         if pos.side == "LONG":
-            pnl = (entry["price"] / pos.entry_price - 1) * 100 * cfg["leverage"]
+            pnl = (entry["price"] / pos.entry_price - 1) * 100 * pos.leverage
             trail_info = f"\n  Trail SL  : {pos.trail_sl:,.6f}  (Peak: {pos.peak:,.6f})\n  Anlık PnL : {pnl:+.2f}%"
         else:
-            pnl = (pos.entry_price / entry["price"] - 1) * 100 * cfg["leverage"]
+            pnl = (pos.entry_price / entry["price"] - 1) * 100 * pos.leverage
             trail_info = f"\n  Trail SL  : {pos.trail_sl:,.6f}  (Valley: {pos.valley:,.6f})\n  Anlık PnL : {pnl:+.2f}%"
 
     daily_ok  = daily == "NONE" or daily == trend["direction"]
@@ -1570,6 +1613,13 @@ def count_open_side(positions: dict, side: str) -> int:
     return sum(1 for p in positions.values() if p.active and p.side == side)
 
 
+def total_margin(positions: dict) -> float:
+    """Tüm açık pozisyonların kullandığı toplam marj (USDT) — maruziyet kontrolü için."""
+    return sum(p.amount * p.entry_price / p.leverage
+               for p in positions.values()
+               if p.active and p.entry_price > 0 and p.leverage > 0)
+
+
 def log_open_positions(ex, positions: dict) -> float:
     """Açık pozisyonları ve gerçekleşmemiş (unrealized) PnL'lerini gösterir.
     Toplam açık USDT PnL'i döner."""
@@ -1587,7 +1637,7 @@ def log_open_positions(ex, positions: dict) -> float:
         else:
             pnl_pct = (p.entry_price / price - 1) * 100
             usdt    = p.amount * (p.entry_price - price)
-        pnl_lev = pnl_pct * cfg["leverage"]     # marj üzerindeki % (kaldıraçlı)
+        pnl_lev = pnl_pct * p.leverage           # marj üzerindeki % (kaldıraçlı)
         total_usdt += usdt
         dur   = int((time.time() - p.open_time) / 60) if p.open_time else 0
         emoji = "🟢" if pnl_lev >= 0 else "🔴"
@@ -1698,47 +1748,55 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
         log_scan(symbol, trend, entry, signal, pos, daily, entry_trend)
 
         if signal in ("LONG", "SHORT"):
-            # Risk-bazlı boyut için önce SL'i hesapla (pos.open ile AYNI formül)
+            # Boyut+kaldıraç için önce SL'i hesapla (pos.open ile AYNI formül)
             sl_pre, _ = compute_sltp(price, entry["atr"], signal)
-            amount = calc_amount(ex, symbol, price, sl_pre, balance)
+            res  = calc_amount(ex, symbol, price, sl_pre, balance)
             _mpd = cfg.get("max_per_direction", 0)
-            if amount is None:
+            # Yeni pozisyonun marjı ve toplam maruziyet kontrolü
+            new_margin = balance * cfg["position_pct"] if cfg.get("dynamic_leverage") else cfg["trade_usdt"]
+            exposure_full = (cfg.get("dynamic_leverage") and balance > 0
+                             and total_margin(positions) + new_margin > balance * cfg["total_exposure_pct"] + 1e-9)
+            if res is None:
                 pass
             elif _mpd and count_open_side(positions, signal) >= _mpd:
                 log.info(f"⚖️  [{symbol}] Aynı yönde ({signal}) zaten pozisyon var → korelasyon koruması, atla")
+            elif exposure_full:
+                log.info(f"⛔ [{symbol}] Toplam maruziyet %{cfg['total_exposure_pct']*100:.0f} dolu → atla")
             elif not spread_ok(ex, symbol, cfg["max_spread_pct"]):
                 pass
-            elif not ensure_leverage(ex, symbol, cfg["leverage"]):
-                pass
             else:
-                pos.open(signal, price, entry["atr"], amount)
-                # Giriş anındaki koşulları sakla (CSV günlüğü için)
-                L = signal == "LONG"
-                pos.entry_snapshot = {
-                    "adx": trend["adx"], "daily": daily, "tf1h": entry_trend, "tf5": tf5, "tf15": tf15,
-                    "score": entry["long_score"] if L else entry["short_score"],
-                    "stoch": entry["stoch_long"] if L else entry["stoch_short"],
-                    "rsi":   entry["rsi_long"]   if L else entry["rsi_short"],
-                    "macd":  entry["macd_up"]    if L else entry["macd_down"],
-                    "vol":   entry["vol_ok"],
-                    "st":    entry["st_long"]    if L else entry["st_short"],
-                    "ema":   entry["ema_long_ok"] if L else entry["ema_short_ok"],
-                }
-                ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
-                if not ok:
-                    log.warning(f"⚠️  [{symbol}] Emir başarısız, pozisyon hafızadan siliniyor")
-                    pos.active = False
-                    pos.side = None
+                amount, lev = res
+                if not ensure_leverage(ex, symbol, lev):
+                    pass   # kaldıraç kurulamadı → açma
                 else:
-                    coin = symbol.split("/")[0]
-                    sl_pct = abs(price - pos.stop_loss) / price * 100
-                    tp_pct = abs(price - pos.take_profit) / price * 100
-                    notify(
-                        f"{'🟢' if L else '🔴'} <b>{coin} {signal} AÇILDI</b>\n"
-                        f"Giriş: {price:g}\n"
-                        f"SL: {pos.stop_loss:g} (-%{sl_pct:.2f})  TP: {pos.take_profit:g} (+%{tp_pct:.2f})\n"
-                        f"Kaldıraç: {cfg['leverage']}x"
-                    )
+                    pos.open(signal, price, entry["atr"], amount, lev)
+                    # Giriş anındaki koşulları sakla (CSV günlüğü için)
+                    L = signal == "LONG"
+                    pos.entry_snapshot = {
+                        "adx": trend["adx"], "daily": daily, "tf1h": entry_trend, "tf5": tf5, "tf15": tf15,
+                        "score": entry["long_score"] if L else entry["short_score"],
+                        "stoch": entry["stoch_long"] if L else entry["stoch_short"],
+                        "rsi":   entry["rsi_long"]   if L else entry["rsi_short"],
+                        "macd":  entry["macd_up"]    if L else entry["macd_down"],
+                        "vol":   entry["vol_ok"],
+                        "st":    entry["st_long"]    if L else entry["st_short"],
+                        "ema":   entry["ema_long_ok"] if L else entry["ema_short_ok"],
+                    }
+                    ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
+                    if not ok:
+                        log.warning(f"⚠️  [{symbol}] Emir başarısız, pozisyon hafızadan siliniyor")
+                        pos.active = False
+                        pos.side = None
+                    else:
+                        coin = symbol.split("/")[0]
+                        sl_pct = abs(price - pos.stop_loss) / price * 100
+                        tp_pct = abs(price - pos.take_profit) / price * 100
+                        margin = pos.amount * price / pos.leverage
+                        notify(
+                            f"{'🟢' if L else '🔴'} <b>{coin} {signal} AÇILDI</b>\n"
+                            f"Giriş: {price:g}  Kaldıraç: {pos.leverage}x  Marj: {margin:.1f} USDT\n"
+                            f"SL: {pos.stop_loss:g} (-%{sl_pct:.2f})  TP: {pos.take_profit:g} (+%{tp_pct:.2f})"
+                        )
 
     except ccxt.NetworkError as e:
         log.warning(f"🌐 [{symbol}] Ağ: {e}")
@@ -1767,10 +1825,14 @@ def main():
     else:
         _scan_mode = f"{len(cfg.get('core_symbols', []))} ana + saatlik top {cfg['top_volatile_count']} volatil"
     log.info(f"  Coinler    : {len(symbols)} coin — {_scan_mode}  (max {cfg['max_positions']} pozisyon)")
-    log.info(f"  Kaldıraç   : {cfg['leverage']}x")
-    if cfg.get("risk_based_sizing"):
+    if cfg.get("dynamic_leverage"):
+        log.info(f"  Kaldıraç   : DİNAMİK {cfg['min_leverage']}-{cfg['max_leverage']}x (risk hedefine göre)")
+        log.info(f"  Boyut      : marj=%{cfg['position_pct']*100:.0f} bakiye/pozisyon  toplam≤%{cfg['total_exposure_pct']*100:.0f}  risk≈%{cfg['risk_per_trade_pct']}")
+    elif cfg.get("risk_based_sizing"):
+        log.info(f"  Kaldıraç   : {cfg['leverage']}x")
         log.info(f"  Boyut      : risk-bazlı — her işlemde bakiyenin %{cfg['risk_per_trade_pct']}'i riskte")
     else:
+        log.info(f"  Kaldıraç   : {cfg['leverage']}x")
         log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
     log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
