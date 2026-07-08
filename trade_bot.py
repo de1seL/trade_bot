@@ -48,6 +48,7 @@ import logging
 import urllib.parse
 import urllib.request
 from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor
 
 import ccxt
 import numpy as np
@@ -215,6 +216,10 @@ CONFIG = {
     "notify_telegram"     : True,          # aç/kapa/hata/mola bildirimi (.env'de token gerekli)
 
     # ── Sistem ───────────────────────────────────────────────
+    # Paralel tarama: aday coinlerin mumlarını 5 thread ile aynı anda çekip cache'i
+    # ısıtır → döngü çok daha hızlı. SADECE veri çekme paralel; emirler yine SIRALI.
+    "parallel_scan"       : True,
+    "scan_workers"        : 5,
     "loop_sec"            : 15,
     "dry_run"             : False,
 }
@@ -555,6 +560,34 @@ def fetch_ohlcv_cached(ex, symbol: str, tf: str, limit: int, ttl: float) -> pd.D
     df = fetch_ohlcv(ex, symbol, tf, limit)
     _OHLCV_CACHE[key] = (now, df)
     return df
+
+
+def prefetch_ohlcv(ex, symbols: list[str]):
+    """Aday coinlerin TÜM zaman dilimi mumlarını 5 thread ile PARALEL çekip cache'i
+    ısıtır. Read-only (state değiştirmez) → güvenli. Sonraki sıralı döngü cache'ten
+    okuduğu için çok hızlı çalışır. Emir/pozisyon mantığı hiç değişmez, sıralı kalır."""
+    cfg = CONFIG
+    if not symbols or not cfg.get("parallel_scan"):
+        return
+    jobs = []
+    for s in symbols:
+        jobs.append((s, cfg["daily_tf"], 260, cfg["cache_1d_sec"]))
+        jobs.append((s, cfg["trend_tf"], 250, cfg["cache_4h_sec"]))
+        jobs.append((s, cfg["entry_tf"], 300, cfg["cache_1h_sec"]))
+        jobs.append((s, "5m",  120, 60))
+        jobs.append((s, "15m", 120, 120))
+
+    def _one(j):
+        try:
+            fetch_ohlcv_cached(ex, j[0], j[1], j[2], j[3])
+        except Exception:
+            pass   # bir coin patlarsa diğerleri devam etsin (sıralı döngü zaten yeniden dener)
+
+    try:
+        with ThreadPoolExecutor(max_workers=cfg.get("scan_workers", 5)) as pool:
+            list(pool.map(_one, jobs))
+    except Exception as e:
+        log.warning(f"⚠️  Paralel ön-tarama hatası (sıralıya düşülüyor): {e}")
 
 
 def get_btc_change(ex: ccxt.Exchange) -> float:
@@ -1829,9 +1862,18 @@ def main():
             mins = int((pause_until - time.time()) / 60) + 1
             log.info(f"🎯 Kâr hedefi molası: {mins} dk daha yeni işlem yok (açık pozisyonlar yönetiliyor)")
 
+        # PARALEL ÖN-TARAMA: giriş mümkünse, aday coinlerin mumlarını 5 thread ile
+        # aynı anda çekip cache'i ısıt. Sonraki sıralı döngü cache'ten okur → çok hızlı.
+        if cfg.get("parallel_scan") and allow_entry and count_open(positions) < cfg["max_positions"]:
+            cands = [s for s in symbols if not positions[s].active and not positions[s].in_cooldown()]
+            t0 = time.time()
+            prefetch_ohlcv(ex, cands)
+            log.info(f"⚡ Paralel tarama: {len(cands)} coin {cfg['scan_workers']} thread ile {time.time()-t0:.1f}s'de tarandı")
+
+        _sym_sleep = 0.1 if cfg.get("parallel_scan") else 0.5   # cache sıcaksa bekleme kısa
         for sym in symbols:
             run_symbol(ex, sym, positions[sym], positions, btc_chg, live_pos, allow_entry, current_balance)
-            time.sleep(0.5)
+            time.sleep(_sym_sleep)
 
         # Açık pozisyonları ve gerçekleşmemiş PnL'leri göster
         open_usdt = log_open_positions(ex, positions)
