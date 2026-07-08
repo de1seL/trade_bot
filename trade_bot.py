@@ -204,6 +204,12 @@ CONFIG = {
     "roi_tp_enabled"      : False,
     "roi_tp_pct"          : 0.035,
 
+    # ── Zaman + Kâr çıkışı ───────────────────────────────────
+    # Pozisyon N saattir açıksa VE kaldıraçlı ROI ≥ %X ise direkt kapat (kârı kilitle).
+    "time_profit_enabled" : True,
+    "time_profit_hours"   : 1.0,          # 1 saattir açıksa
+    "time_profit_roi_pct" : 5.0,          # ve ROI ≥ +%5 ise → sat
+
     # ── İşlem günlüğü & Bildirim ─────────────────────────────
     "trade_log_csv"       : "trades.csv",  # her kapanan işlem buraya yazılır (Excel'de aç)
     "notify_telegram"     : True,          # aç/kapa/hata/mola bildirimi (.env'de token gerekli)
@@ -1032,6 +1038,18 @@ class Position:
 
         if self.open_time is None:
             self.open_time = time.time()
+
+        # Zaman + Kâr çıkışı: N saattir açık VE kaldıraçlı ROI ≥ %X → kârı kilitle
+        if CONFIG.get("time_profit_enabled"):
+            hours_open = (time.time() - self.open_time) / 3600
+            if hours_open >= CONFIG["time_profit_hours"]:
+                if self.side == "LONG":
+                    roi = (price - self.entry_price) / self.entry_price * 100 * CONFIG["leverage"]
+                else:
+                    roi = (self.entry_price - price) / self.entry_price * 100 * CONFIG["leverage"]
+                if roi >= CONFIG["time_profit_roi_pct"]:
+                    return "ZAMAN_KAR"
+
         if (time.time() - self.open_time) / 3600 >= CONFIG["max_pos_hours"]:
             return "ZAMAN_LIMITI"
         if self.side == "LONG":
