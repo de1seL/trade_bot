@@ -785,8 +785,10 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     bb_over_short = price < bb_lo_lvl - cfg["bb_ext_frac"] * _band
 
     # ── Skor hesaplama (6 koşul) ─────────────────────────────
-    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long,  ema_long_ok])
-    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short, ema_short_ok])
+    # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor
+    # (çifte sayımı önlemek için burada sayılmaz). Skor: 5 bağımsız koşul.
+    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long])
+    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short])
 
     # ── Tetikleyiciler ───────────────────────────────────────
     long_trigger  = macd_up   or stoch_long
@@ -1512,11 +1514,11 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}\n"
         f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
         f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
-        f"  EMA Hizalama: {'✅' if entry['ema_long_ok'] else '⬜'}\n"
-        f"  LONG ({entry['long_score']}/6, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])} EMA{t(entry['ema_long_ok'])}\n"
-        f"  SHORT({entry['short_score']}/6, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])} EMA{t(entry['ema_short_ok'])}\n"
+        f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
+        f"  LONG ({entry['long_score']}/5, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
+        f"  SHORT({entry['short_score']}/5, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -1739,7 +1741,7 @@ def main():
         log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
     log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/6 koşul + zorunlu tetik (EMA9/20/50 eklendi)")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik + EMA9/20/50 kapısı")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']}")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
