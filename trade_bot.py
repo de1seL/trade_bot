@@ -207,7 +207,7 @@ CONFIG = {
     # ── Zaman + Kâr çıkışı ───────────────────────────────────
     # Pozisyon N saattir açıksa VE kaldıraçlı ROI ≥ %X ise direkt kapat (kârı kilitle).
     "time_profit_enabled" : True,
-    "time_profit_hours"   : 1.0,          # 1 saattir açıksa
+    "time_profit_hours"   : 2.0,          # 2 saattir açıksa
     "time_profit_roi_pct" : 5.0,          # ve ROI ≥ +%5 ise → sat
 
     # ── İşlem günlüğü & Bildirim ─────────────────────────────
