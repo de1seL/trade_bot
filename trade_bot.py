@@ -373,8 +373,13 @@ def fetch_balance(ex: ccxt.Exchange) -> float:
         return bal
     try:
         b = ex.fetch_balance()
-        u = float(b["USDT"]["free"])
-        log.info(f"💰 Bakiye: {u:.2f} USDT")
+        usdt = b["USDT"]
+        # Pozisyon boyutlandırması ve %40 maruziyet tavanı için SABİT toplam
+        # özkaynağı (total) kullan. "free" bakiye ilk pozisyon marjı kilitlenince
+        # küçülür → yanlışlıkla "maruziyet %40 dolu" der. "total" = cüzdan değeri.
+        u = float(usdt.get("total") or usdt.get("free") or 0)
+        free = float(usdt.get("free") or 0)
+        log.info(f"💰 Bakiye: {u:.2f} USDT (toplam)  |  kullanılabilir: {free:.2f}")
         return u
     except Exception as e:
         log.error(f"❌ Bakiye çekilemedi, bot güvenlik için durduruluyor: {e}")
@@ -665,7 +670,8 @@ def fetch_balance_quiet(ex):
         return None
     try:
         b = ex.fetch_balance()
-        return float(b["USDT"]["free"])
+        usdt = b["USDT"]
+        return float(usdt.get("total") or usdt.get("free") or 0)
     except Exception as e:
         log.warning(f"⚠️  Bakiye yenilenemedi (eski değer kullanılıyor): {e}")
         return None
