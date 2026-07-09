@@ -98,6 +98,10 @@ CONFIG = {
     # ── ADX (4h) ─────────────────────────────────────────────
     "adx_period"          : 14,
     "adx_threshold"       : 27,             # 30 çok yüksekti; 27 = güçlü trend ama fazla kısıtlamaz
+    "adx_max"             : 48,             # ADX bunun ÜSTÜNDEyse trend YORGUN → giriş yok (tepeden alım freni)
+
+    # ── Günlük coin yasağı ───────────────────────────────────
+    "daily_coin_ban_sl"   : 2,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak (tekrar-deneme freni)
 
     # ── Stochastic RSI (entry_tf) ────────────────────────────
     "stoch_period"        : 14,
@@ -298,11 +302,24 @@ class PnLTracker:
         self.wins        = 0
         self.losses      = 0
         self.consecutive_losses = 0   # #2 üst üste zarar sayacı (kazançta sıfırlanır)
+        self.daily_sl_count = {}      # {symbol: o gün kaç kez SL} → günlük coin yasağı
 
     def _roll_day_if_needed(self):
         if date.today() != self.daily_date:
             self.daily_pnl  = 0.0
             self.daily_date = date.today()
+            self.daily_sl_count = {}   # yeni gün → yasaklar sıfırlanır
+
+    def register_sl(self, symbol: str):
+        """Bir coin STOP_LOSS yediğinde çağrılır → günlük SL sayacını artırır."""
+        self._roll_day_if_needed()
+        self.daily_sl_count[symbol] = self.daily_sl_count.get(symbol, 0) + 1
+
+    def is_coin_banned(self, symbol: str) -> bool:
+        """Coin bugün ban_sl kadar SL yediyse o gün yasaklı (True)."""
+        self._roll_day_if_needed()
+        limit = CONFIG.get("daily_coin_ban_sl", 0)
+        return limit > 0 and self.daily_sl_count.get(symbol, 0) >= limit
 
     def record(self, pnl_pct: float, usdt: float):
         pnl_usdt = usdt * pnl_pct / 100
@@ -938,6 +955,9 @@ def get_signal(trend: dict, entry: dict, daily: str, btc_chg: float = 0.0,
 
     if d == "NONE":          return "HOLD"
     if not trend["adx_ok"]: return "HOLD"
+    # Aşırı yüksek ADX = trend YORGUN/aşırı-uzamış → tepeden alım riski, girme.
+    if cfg.get("adx_max") and trend["adx"] >= cfg["adx_max"]:
+        return "HOLD"
 
     # Coin momentum filtresi
     coin_chg = entry.get("coin_chg_1h", 0.0)
@@ -1160,6 +1180,8 @@ class Position:
         margin  = (self.amount * self.entry_price / self.leverage) if self.entry_price > 0 else cfg["trade_usdt"]
         pnl_usdt = margin * pnl_net / 100
         pnl_tracker.record(pnl_net, margin)
+        if reason == "STOP_LOSS":
+            pnl_tracker.register_sl(self.symbol)   # günlük coin yasağı sayacı
 
         # ── İşlem günlüğü (CSV) ──
         sn = self.entry_snapshot or {}
@@ -1717,6 +1739,10 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
         mins = int((pos.cooldown_until - time.time()) / 60) + 1
         log.info(f"⏸️  [{symbol}] Cooldown: {mins} dk")
         return
+    if pnl_tracker.is_coin_banned(symbol):
+        n = pnl_tracker.daily_sl_count.get(symbol, 0)
+        log.info(f"🚫 [{symbol}] Bugün {n} kez SL yedi → gün sonuna kadar YASAK (tekrar-deneme freni)")
+        return
     if count_open(positions) >= cfg["max_positions"]:
         return
 
@@ -1844,7 +1870,8 @@ def main():
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
     log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik + EMA9/20/50 kapısı")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
-    log.info(f"  ADX Eşiği  : {cfg['adx_threshold']}")
+    log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
+    log.info(f"  Coin Yasağı: günde {cfg.get('daily_coin_ban_sl', 0)} SL → o coin gün sonuna kadar yasak")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
     log.info(f"  Zarar Lim  : {('%'+str(cfg['daily_loss_pct'])) if cfg.get('daily_loss_enabled', False) else 'KAPALI'}")
     log.info(f"  Kâr Hedefi : +%{cfg['daily_profit_target_pct']:.0f} → {cfg['profit_pause_hours']}s mola")
