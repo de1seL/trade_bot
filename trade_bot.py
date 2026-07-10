@@ -98,7 +98,7 @@ CONFIG = {
     # ── ADX (4h) ─────────────────────────────────────────────
     "adx_period"          : 14,
     "adx_threshold"       : 27,             # 30 çok yüksekti; 27 = güçlü trend ama fazla kısıtlamaz
-    "adx_max"             : 48,             # ADX bunun ÜSTÜNDEyse trend YORGUN → giriş yok (tepeden alım freni)
+    "adx_max"             : 40,             # ADX bunun ÜSTÜNDEyse trend YORGUN → giriş yok. Veri: ADX 30-40 kârlı, 40+ kanıyor.
 
     # ── Günlük coin yasağı ───────────────────────────────────
     "daily_coin_ban_sl"   : 2,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak (tekrar-deneme freni)
@@ -120,6 +120,11 @@ CONFIG = {
     "macd_slow"           : 26,
     "macd_sig"            : 9,
     "macd_lookback"       : 5,
+    # Veri analizi: MACD crossover TRUE iken WR %30, FALSE iken %56 → MACD geç
+    # sinyal, tepeden alım yaptırıyor. Tetikten ve skordan çıkarıldı.
+    # (Geri açmak için ikisini True yap.)
+    "macd_in_trigger"     : False,          # MACD zorunlu tetiğe dahil mi
+    "macd_in_score"       : False,          # MACD skora dahil mi
 
     # ── Süper Trend (entry_tf) ──────────────────────────────
     "st_period"           : 10,
@@ -882,15 +887,21 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     bb_over_long  = price > bb_up_lvl + cfg["bb_ext_frac"] * _band
     bb_over_short = price < bb_lo_lvl - cfg["bb_ext_frac"] * _band
 
-    # ── Skor hesaplama (6 koşul) ─────────────────────────────
-    # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor
-    # (çifte sayımı önlemek için burada sayılmaz). Skor: 5 bağımsız koşul.
-    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long])
-    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short])
+    # ── Skor hesaplama ───────────────────────────────────────
+    # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor.
+    # MACD veri analizinde zarar getirdiği için config ile skordan çıkarılabilir.
+    _use_macd_score = cfg.get("macd_in_score", True)
+    long_score  = sum([stoch_long,  rsi_long,  vol_ok, st_long]  + ([macd_up]   if _use_macd_score else []))
+    short_score = sum([stoch_short, rsi_short, vol_ok, st_short] + ([macd_down] if _use_macd_score else []))
 
     # ── Tetikleyiciler ───────────────────────────────────────
-    long_trigger  = macd_up   or stoch_long
-    short_trigger = macd_down or stoch_short
+    # MACD tetikte zarar getirdiği için config ile çıkarılabilir → sadece StochRSI tetik.
+    if cfg.get("macd_in_trigger", True):
+        long_trigger  = macd_up   or stoch_long
+        short_trigger = macd_down or stoch_short
+    else:
+        long_trigger  = stoch_long
+        short_trigger = stoch_short
 
     return {
         "price"       : round(price, 6),
@@ -1663,6 +1674,10 @@ def _estimate_open_time(ex, symbol: str, side: str) -> float:
 def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
     t   = lambda b: "✅" if b else "⬜"
     cfg = CONFIG
+    # MACD skorda/tetikte mi → gösterimi ona göre ayarla
+    _use_macd = cfg.get("macd_in_score", True)
+    _maxsc    = 5 if _use_macd else 4
+    _macd_disp = (lambda b: f" MACD{t(b)}") if _use_macd else (lambda b: f" MACD{'🔘' if b else '·'}(off)")
     sl_p = entry["atr"] * cfg["atr_sl_mult"] / entry["price"] * 100
     sl_p = min(max(sl_p, cfg["min_sl_pct"] * 100), cfg["max_sl_pct"] * 100)
     tp_p = sl_p * cfg["rr_ratio"]
@@ -1700,10 +1715,10 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
         f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
         f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
-        f"  LONG ({entry['long_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
-        f"  SHORT({entry['short_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
+        f"  LONG ({entry['long_score']}/{_maxsc}, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])}{_macd_disp(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
+        f"  SHORT({entry['short_score']}/{_maxsc}, min={cfg['min_conditions']}): "
+        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])}{_macd_disp(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -1963,7 +1978,8 @@ def main():
         log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
     log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik + EMA9/20/50 kapısı")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/{5 if cfg.get('macd_in_score', True) else 4} koşul + zorunlu tetik + EMA9/20/50 kapısı")
+    log.info(f"  MACD       : tetik={'açık' if cfg.get('macd_in_trigger', True) else 'KAPALI'}  skor={'açık' if cfg.get('macd_in_score', True) else 'KAPALI'} (veri: geç sinyal)")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
     log.info(f"  Coin Yasağı: günde {cfg.get('daily_coin_ban_sl', 0)} SL → o coin gün sonuna kadar yasak")
