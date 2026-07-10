@@ -101,7 +101,8 @@ CONFIG = {
     "adx_max"             : 42,             # tavan 40→42 (hafif). Veri: 40+ kanıyor, o yüzden fazla açmıyoruz.
 
     # ── Günlük coin yasağı ───────────────────────────────────
-    "daily_coin_ban_sl"   : 2,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak (tekrar-deneme freni)
+    "daily_coin_ban_sl"   : 1,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak. Veri:
+                                            # VANRY/EDGE/EVAA/KAITO/AKE tekrar-girişleri zararın çoğu → 1 SL = yasak.
 
     # ── Stochastic RSI (entry_tf) ────────────────────────────
     "stoch_period"        : 14,
@@ -216,7 +217,7 @@ CONFIG = {
     "balance_refresh_sec" : 300,
     "cooldown_sl_sec"     : 3600,
     "cooldown_tp_sec"     : 3600,
-    "max_pos_hours"       : 4,
+    "max_pos_hours"       : 3,              # 4→3: ölü/sürünen işlemler daha erken kapansın, sermaye boşa bağlanmasın
     "max_spread_pct"      : 0.0015,
 
     # ── Trailing senkron ─────────────────────────────────────
