@@ -97,8 +97,8 @@ CONFIG = {
 
     # ── ADX (4h) ─────────────────────────────────────────────
     "adx_period"          : 14,
-    "adx_threshold"       : 27,             # 30 çok yüksekti; 27 = güçlü trend ama fazla kısıtlamaz
-    "adx_max"             : 40,             # ADX bunun ÜSTÜNDEyse trend YORGUN → giriş yok. Veri: ADX 30-40 kârlı, 40+ kanıyor.
+    "adx_threshold"       : 24,             # taban 27→24 (trend oluşuyor bölgesi) → daha çok işlem
+    "adx_max"             : 42,             # tavan 40→42 (hafif). Veri: 40+ kanıyor, o yüzden fazla açmıyoruz.
 
     # ── Günlük coin yasağı ───────────────────────────────────
     "daily_coin_ban_sl"   : 2,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak (tekrar-deneme freni)
