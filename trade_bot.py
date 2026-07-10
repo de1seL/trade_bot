@@ -185,7 +185,8 @@ CONFIG = {
     "partial_runner_rr"   : 3.0,          # kalan yarının hedefi (R cinsinden, eski 1.5 yerine)
 
     # ── Giriş eşiği ─────────────────────────────────────────
-    "min_conditions"      : 3,    # 6 koşuldan en az 3'ü sağlanmalı (+ zorunlu tetik)
+    "min_conditions"      : 2,    # 4 BAĞIMSIZ koşuldan en az 2 (+ zorunlu tetik). Bağımsız
+                                   # set nadiren hizalandığı için 2 ≈ eski korele 3. 1h ters ise +1.
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
