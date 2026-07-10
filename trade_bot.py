@@ -74,7 +74,7 @@ CONFIG = {
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
         "DOT/USDT:USDT",
     ],
-    "top_volatile_count"  : 40,
+    "top_volatile_count"  : 100,          # en volatil/likit ilk 100 coin (+ core = ~110)
     "symbol_refresh_sec"  : 900,          # coin listesini 15 dk'da bir yenile (paralel)
 
     # ── Tarama filtreleri ───────────────────────────────────
@@ -247,7 +247,7 @@ CONFIG = {
     # Paralel tarama: aday coinlerin mumlarını 5 thread ile aynı anda çekip cache'i
     # ısıtır → döngü çok daha hızlı. SADECE veri çekme paralel; emirler yine SIRALI.
     "parallel_scan"       : True,
-    "scan_workers"        : 5,
+    "scan_workers"        : 8,            # 100 coin taranırken paralel veri çekmeyi hızlı tut
     "loop_sec"            : 15,
     "dry_run"             : False,
 }
