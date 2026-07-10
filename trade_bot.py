@@ -138,6 +138,13 @@ CONFIG = {
     # (Eski hacim koşuluna dönmek için use_cmf=False.)
     "use_cmf"             : True,
     "cmf_period"          : 20,
+    # ── Decorrelated set: her koşul FARKLI aileden ──────────
+    # Skor = RSI(momentum) + CMF(para akışı) + SuperTrend(trend) + Donchian(yapı).
+    # StochRSI skordan çıkarıldı (RSI ile aynı aile = momentum tekrarı).
+    # Tetik = Donchian kırılımı VEYA RSI 50 orta çizgi geçişi (taze olay).
+    "use_donchian"        : True,          # Donchian kırılımı skora + tetiğe (yapı ailesi)
+    "donchian_period"     : 20,            # önceki kaç mumun zirvesi/dibi kırılsın
+    "stochrsi_in_score"   : False,         # StochRSI skorda mı (False = momentum tekrarını kaldır)
 
     # ── Bollinger Bands (entry_tf) — AŞIRI-UZAMA FİLTRESİ ──
     "bb_period"           : 20,
@@ -911,16 +918,48 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     bb_over_long  = price > bb_up_lvl + cfg["bb_ext_frac"] * _band
     bb_over_short = price < bb_lo_lvl - cfg["bb_ext_frac"] * _band
 
-    # ── Skor hesaplama ───────────────────────────────────────
-    # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor.
-    # MACD veri analizinde zarar getirdiği için config ile skordan çıkarılabilir.
-    _use_macd_score = cfg.get("macd_in_score", True)
-    long_score  = sum([stoch_long,  rsi_long,  flow_long,  st_long]  + ([macd_up]   if _use_macd_score else []))
-    short_score = sum([stoch_short, rsi_short, flow_short, st_short] + ([macd_down] if _use_macd_score else []))
+    # ── Donchian breakout (yapı/kırılım ailesi) ──────────────
+    # Fiyat ÖNCEKİ N mumun zirvesini/dibini kırdı mı → taze yapısal olay.
+    donch_long = donch_short = False
+    dc_up = dc_dn = 0.0
+    if cfg.get("use_donchian", False):
+        dp = cfg["donchian_period"]
+        if len(df) >= dp + 1:
+            dc_up = float(df["high"].iloc[-(dp+1):-1].max())
+            dc_dn = float(df["low"].iloc[-(dp+1):-1].min())
+            donch_long  = price > dc_up
+            donch_short = price < dc_dn
 
-    # ── Tetikleyiciler ───────────────────────────────────────
-    # MACD tetikte zarar getirdiği için config ile çıkarılabilir → sadece StochRSI tetik.
-    if cfg.get("macd_in_trigger", True):
+    # ── RSI 50 orta çizgi geçişi (taze momentum olayı — tetik) ─
+    rsi_cross_up = rsi_cross_dn = False
+    if len(rsi_series) >= 2:
+        _wr = rsi_series.iloc[-(lb+1):]
+        for i in range(len(_wr) - 1):
+            a = float(_wr.iloc[i]); b = float(_wr.iloc[i+1])
+            if a <= 50 < b: rsi_cross_up = True
+            if a >= 50 > b: rsi_cross_dn = True
+
+    # ── Skor: bağımsız (decorrelated) aileler — config ile ───
+    # Çekirdek 3 aile: RSI(momentum) + CMF/flow(para akışı) + SuperTrend(trend).
+    # EMA9/20/50 SKORDA DEĞİL (calc_entry_trend'de kapı). Aşağıdakiler config'e bağlı:
+    _parts_l = [rsi_long,  flow_long,  st_long]
+    _parts_s = [rsi_short, flow_short, st_short]
+    if cfg.get("stochrsi_in_score", True):          # StochRSI (RSI ile aynı aile — varsayılan KAPALI)
+        _parts_l.append(stoch_long);  _parts_s.append(stoch_short)
+    if cfg.get("macd_in_score", True):              # MACD (veri: zarar — varsayılan KAPALI)
+        _parts_l.append(macd_up);     _parts_s.append(macd_down)
+    if cfg.get("use_donchian", False):              # Donchian kırılımı (yapı ailesi — YENİ)
+        _parts_l.append(donch_long);  _parts_s.append(donch_short)
+    long_score  = sum(_parts_l)
+    short_score = sum(_parts_s)
+    max_score   = len(_parts_l)
+
+    # ── Tetik (taze olay) ────────────────────────────────────
+    if cfg.get("use_donchian", False):
+        # Yeni decorrelated set: Donchian kırılımı VEYA RSI 50 geçişi
+        long_trigger  = donch_long  or rsi_cross_up
+        short_trigger = donch_short or rsi_cross_dn
+    elif cfg.get("macd_in_trigger", True):
         long_trigger  = macd_up   or stoch_long
         short_trigger = macd_down or stoch_short
     else:
@@ -951,6 +990,13 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
         "cmf"         : round(cmf_val, 4),
         "cmf_long"    : cmf_long,
         "cmf_short"   : cmf_short,
+        "donch_long"  : donch_long,
+        "donch_short" : donch_short,
+        "dc_up"       : round(dc_up, 6),
+        "dc_dn"       : round(dc_dn, 6),
+        "rsi_cross_up": rsi_cross_up,
+        "rsi_cross_dn": rsi_cross_dn,
+        "max_score"   : max_score,
         "flow_long"   : flow_long,
         "flow_short"  : flow_short,
         "bb_up"       : round(bb_up_lvl, 6),
@@ -1703,11 +1749,21 @@ def _estimate_open_time(ex, symbol: str, side: str) -> float:
 def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
     t   = lambda b: "✅" if b else "⬜"
     cfg = CONFIG
-    # MACD skorda/tetikte mi → gösterimi ona göre ayarla
-    _use_macd = cfg.get("macd_in_score", True)
-    _maxsc    = 5 if _use_macd else 4
-    _macd_disp = (lambda b: f" MACD{t(b)}") if _use_macd else (lambda b: f" MACD{'🔘' if b else '·'}(off)")
-    _flow_lbl  = "CMF" if cfg.get("use_cmf", True) else "Hacim"
+    _flow_lbl = "CMF" if cfg.get("use_cmf", True) else "Hacim"
+    _maxsc    = entry.get("max_score", 4)
+
+    def _conds(side):   # aktif skor koşullarını dinamik diz (side: "long"/"short")
+        md = "macd_up" if side == "long" else "macd_down"
+        parts = [f"RSI{t(entry['rsi_'+side])}",
+                 f"{_flow_lbl}{t(entry.get('flow_'+side, entry['vol_ok']))}",
+                 f"ST{t(entry['st_'+side])}"]
+        if cfg.get("stochrsi_in_score", True):
+            parts.insert(0, f"StochRSI{t(entry['stoch_'+side])}")
+        if cfg.get("macd_in_score", True):
+            parts.append(f"MACD{t(entry[md])}")
+        if cfg.get("use_donchian", False):
+            parts.append(f"Kırılım{t(entry.get('donch_'+side, False))}")
+        return " ".join(parts)
     sl_p = entry["atr"] * cfg["atr_sl_mult"] / entry["price"] * 100
     sl_p = min(max(sl_p, cfg["min_sl_pct"] * 100), cfg["max_sl_pct"] * 100)
     tp_p = sl_p * cfg["rr_ratio"]
@@ -1745,11 +1801,12 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"CMF: {entry.get('cmf', 0):+.3f} {'🟢alım' if entry.get('cmf',0)>0 else '🔴satım' if entry.get('cmf',0)<0 else '➖'}\n"
         f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
         f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
+        + (f"  Donchian: üst={entry.get('dc_up',0):,.6f}  alt={entry.get('dc_dn',0):,.6f}  "
+           f"{'🟢kırılım↑' if entry.get('donch_long') else '🔴kırılım↓' if entry.get('donch_short') else '➖ bant içi'}\n"
+           if cfg.get("use_donchian", False) else "") +
         f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
-        f"  LONG ({entry['long_score']}/{_maxsc}, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])}{_macd_disp(entry['macd_up'])} {_flow_lbl}{t(entry.get('flow_long', entry['vol_ok']))} ST{t(entry['st_long'])}\n"
-        f"  SHORT({entry['short_score']}/{_maxsc}, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])}{_macd_disp(entry['macd_down'])} {_flow_lbl}{t(entry.get('flow_short', entry['vol_ok']))} ST{t(entry['st_short'])}\n"
+        f"  LONG ({entry['long_score']}/{_maxsc}, min={cfg['min_conditions']}): {_conds('long')}\n"
+        f"  SHORT({entry['short_score']}/{_maxsc}, min={cfg['min_conditions']}): {_conds('short')}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -2009,9 +2066,15 @@ def main():
         log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
     log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/{5 if cfg.get('macd_in_score', True) else 4} koşul + zorunlu tetik + EMA9/20/50 kapısı")
-    log.info(f"  MACD       : tetik={'açık' if cfg.get('macd_in_trigger', True) else 'KAPALI'}  skor={'açık' if cfg.get('macd_in_score', True) else 'KAPALI'} (veri: geç sinyal)")
-    log.info(f"  Para Akışı : {'CMF (yönlü)' if cfg.get('use_cmf', True) else 'Hacim büyüklüğü'} → skorda para-akışı slotu")
+    _mx = 3 + (1 if cfg.get('stochrsi_in_score', True) else 0) + (1 if cfg.get('macd_in_score', True) else 0) + (1 if cfg.get('use_donchian', False) else 0)
+    _set = ["RSI", ("CMF" if cfg.get("use_cmf", True) else "Hacim"), "SuperTrend"]
+    if cfg.get("stochrsi_in_score", True): _set.insert(0, "StochRSI")
+    if cfg.get("macd_in_score", True):     _set.append("MACD")
+    if cfg.get("use_donchian", False):     _set.append("Donchian")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/{_mx} koşul + zorunlu tetik + EMA9/20/50 kapısı")
+    log.info(f"  Skor Seti  : {' + '.join(_set)}  (bağımsız aileler)")
+    _trig = "Donchian kırılımı VEYA RSI 50 geçişi" if cfg.get("use_donchian", False) else ("MACD/StochRSI" if cfg.get("macd_in_trigger", True) else "StochRSI")
+    log.info(f"  Tetik      : {_trig}")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
     log.info(f"  Coin Yasağı: günde {cfg.get('daily_coin_ban_sl', 0)} SL → o coin gün sonuna kadar yasak")
