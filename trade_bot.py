@@ -237,7 +237,7 @@ CONFIG = {
     # Pozisyon N saattir açıksa VE kaldıraçlı ROI ≥ %X ise direkt kapat (kârı kilitle).
     "time_profit_enabled" : True,
     "time_profit_hours"   : 2.0,          # 2 saattir açıksa
-    "time_profit_roi_pct" : 5.0,          # ve ROI ≥ +%5 ise → sat
+    "time_profit_roi_pct" : 10.0,         # ve ROI ≥ +%10 ise → sat (küçük kazananları kesmesin, koşsun)
 
     # ── İşlem günlüğü & Bildirim ─────────────────────────────
     "trade_log_csv"       : "trades.csv",  # her kapanan işlem buraya yazılır (Excel'de aç)
