@@ -1784,6 +1784,29 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
 
     ema_line = f"EMA9={entry['ema9']:,.4f}  EMA20={entry['ema20_val']:,.4f}  EMA50={entry['ema50_val']:,.4f}"
 
+    # ── Sadece KULLANILAN indikatörlerin okumaları ───────────
+    _cmf = entry.get('cmf', 0)
+    _rl = [f"  RSI  : {entry['rsi']:.1f}",
+           f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}",
+           f"  CMF  : {_cmf:+.3f}  {'🟢alım' if _cmf>0 else '🔴satım' if _cmf<0 else '➖'}"]
+    if cfg.get("stochrsi_in_score", True):
+        _rl.append(f"  StochRSI: K={entry['sk']:.1f}  D={entry['sd']:.1f}")
+    if cfg.get("macd_in_score", True) or cfg.get("macd_in_trigger", True):
+        _rl.append(f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}")
+    if not cfg.get("use_cmf", True):
+        _rl.append(f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}")
+    _ind_lines = "\n".join(_rl)
+
+    # Tetik durumu (neden girdi/girmedi netleşsin)
+    if cfg.get("use_donchian", False):
+        _trg_l = entry.get('donch_long') or entry.get('rsi_cross_up')
+        _trg_s = entry.get('donch_short') or entry.get('rsi_cross_dn')
+        _trg_txt = (f"  Tetik: {'✅' if (_trg_l or _trg_s) else '⬜ YOK'}  "
+                    f"(Kırılım:{t(entry.get('donch_long') or entry.get('donch_short'))} "
+                    f"RSI50geçiş:{t(entry.get('rsi_cross_up') or entry.get('rsi_cross_dn'))})")
+    else:
+        _trg_txt = f"  Tetik: L{t(entry['long_trigger'])} S{t(entry['short_trigger'])}"
+
     log.info(
         f"\n{'─'*54}\n"
         f"  [{sym}]\n"
@@ -1795,11 +1818,7 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  ADX  : {trend['adx']:.1f}  {'✅ güçlü' if trend['adx_ok'] else '⬜ yatay'}\n"
         f"  Fiyat: {entry['price']:>16,.6f}   ATR: {entry['atr']:,.6f}\n"
         f"  SL±{sl_p:.2f}%  TP±{tp_p:.2f}%  R:R 1:{tp_p/sl_p:.1f}\n"
-        f"  StochRSI: K={entry['sk']:.1f}  D={entry['sd']:.1f}   RSI: {entry['rsi']:.1f}\n"
-        f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}\n"
-        f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}\n"
-        f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}   "
-        f"CMF: {entry.get('cmf', 0):+.3f} {'🟢alım' if entry.get('cmf',0)>0 else '🔴satım' if entry.get('cmf',0)<0 else '➖'}\n"
+        f"{_ind_lines}\n"
         f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
         f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
         + (f"  Donchian: üst={entry.get('dc_up',0):,.6f}  alt={entry.get('dc_dn',0):,.6f}  "
@@ -1808,6 +1827,7 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
         f"  LONG ({entry['long_score']}/{_maxsc}, min={cfg['min_conditions']}): {_conds('long')}\n"
         f"  SHORT({entry['short_score']}/{_maxsc}, min={cfg['min_conditions']}): {_conds('short')}\n"
+        f"{_trg_txt}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
