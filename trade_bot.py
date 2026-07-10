@@ -143,8 +143,9 @@ CONFIG = {
     # StochRSI skordan çıkarıldı (RSI ile aynı aile = momentum tekrarı).
     # Tetik = Donchian kırılımı VEYA RSI 50 orta çizgi geçişi (taze olay).
     "use_donchian"        : True,          # Donchian kırılımı skora + tetiğe (yapı ailesi)
-    "donchian_period"     : 20,            # önceki kaç mumun zirvesi/dibi kırılsın
+    "donchian_period"     : 14,            # önceki kaç mumun zirvesi/dibi kırılsın (kısa=sık kırılım)
     "stochrsi_in_score"   : False,         # StochRSI skorda mı (False = momentum tekrarını kaldır)
+    "stochrsi_in_trigger" : True,          # StochRSI dönüşü TETİĞE dahil (skora değil) → yeterli tetik frekansı
 
     # ── Bollinger Bands (entry_tf) — AŞIRI-UZAMA FİLTRESİ ──
     "bb_period"           : 20,
@@ -957,9 +958,12 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
 
     # ── Tetik (taze olay) ────────────────────────────────────
     if cfg.get("use_donchian", False):
-        # Yeni decorrelated set: Donchian kırılımı VEYA RSI 50 geçişi
-        long_trigger  = donch_long  or rsi_cross_up
-        short_trigger = donch_short or rsi_cross_dn
+        # Decorrelated set: Donchian kırılımı VEYA RSI 50 geçişi VEYA StochRSI dönüşü.
+        # StochRSI SADECE tetik (zamanlama) — skorda yok, o yüzden skor bağımsız kalır.
+        _st_l = stoch_long  if cfg.get("stochrsi_in_trigger", False) else False
+        _st_s = stoch_short if cfg.get("stochrsi_in_trigger", False) else False
+        long_trigger  = donch_long  or rsi_cross_up or _st_l
+        short_trigger = donch_short or rsi_cross_dn or _st_s
     elif cfg.get("macd_in_trigger", True):
         long_trigger  = macd_up   or stoch_long
         short_trigger = macd_down or stoch_short
@@ -1799,11 +1803,14 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
 
     # Tetik durumu (neden girdi/girmedi netleşsin)
     if cfg.get("use_donchian", False):
-        _trg_l = entry.get('donch_long') or entry.get('rsi_cross_up')
-        _trg_s = entry.get('donch_short') or entry.get('rsi_cross_dn')
+        _st_on = cfg.get("stochrsi_in_trigger", False)
+        _st_ev = _st_on and (entry.get('stoch_long') or entry.get('stoch_short'))
+        _trg_l = entry.get('donch_long') or entry.get('rsi_cross_up') or (_st_on and entry.get('stoch_long'))
+        _trg_s = entry.get('donch_short') or entry.get('rsi_cross_dn') or (_st_on and entry.get('stoch_short'))
         _trg_txt = (f"  Tetik: {'✅' if (_trg_l or _trg_s) else '⬜ YOK'}  "
                     f"(Kırılım:{t(entry.get('donch_long') or entry.get('donch_short'))} "
-                    f"RSI50geçiş:{t(entry.get('rsi_cross_up') or entry.get('rsi_cross_dn'))})")
+                    f"RSI50geçiş:{t(entry.get('rsi_cross_up') or entry.get('rsi_cross_dn'))}"
+                    + (f" StochRSI:{t(_st_ev)}" if _st_on else "") + ")")
     else:
         _trg_txt = f"  Tetik: L{t(entry['long_trigger'])} S{t(entry['short_trigger'])}"
 
@@ -2094,7 +2101,10 @@ def main():
     if cfg.get("use_donchian", False):     _set.append("Donchian")
     log.info(f"  Min Koşul  : {cfg['min_conditions']}/{_mx} koşul + zorunlu tetik + EMA9/20/50 kapısı")
     log.info(f"  Skor Seti  : {' + '.join(_set)}  (bağımsız aileler)")
-    _trig = "Donchian kırılımı VEYA RSI 50 geçişi" if cfg.get("use_donchian", False) else ("MACD/StochRSI" if cfg.get("macd_in_trigger", True) else "StochRSI")
+    if cfg.get("use_donchian", False):
+        _trig = "Donchian kırılımı VEYA RSI-50 geçişi" + (" VEYA StochRSI dönüşü" if cfg.get("stochrsi_in_trigger", False) else "")
+    else:
+        _trig = "MACD/StochRSI" if cfg.get("macd_in_trigger", True) else "StochRSI"
     log.info(f"  Tetik      : {_trig}")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
