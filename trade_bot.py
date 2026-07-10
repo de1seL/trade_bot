@@ -159,6 +159,14 @@ CONFIG = {
     "trail_pct"           : 0.012,
     "trail_max_pct"       : 0.025,
 
+    # ── Kısmi kâr-al (partial TP) ────────────────────────────
+    # +1R'de pozisyonun YARISINI kapat, stop'u başabaşa çek, kalan yarı
+    # uzak hedefe (runner_rr) koşsun. Kazançları büyütür, riski kilitler.
+    "partial_tp_enabled"  : True,
+    "partial_tp_r"        : 1.0,          # kaçıncı R'de kısmi al (1R)
+    "partial_tp_frac"     : 0.5,          # ne kadarını kapat (yarısı)
+    "partial_runner_rr"   : 3.0,          # kalan yarının hedefi (R cinsinden, eski 1.5 yerine)
+
     # ── Giriş eşiği ─────────────────────────────────────────
     "min_conditions"      : 3,    # 6 koşuldan en az 3'ü sağlanmalı (+ zorunlu tetik)
     "require_trigger"     : True,
@@ -1021,10 +1029,18 @@ class Position:
         self.entry_snapshot = {}      # giriş anındaki koşullar (CSV günlüğü için)
         self.open_time      = None
         self.cooldown_until = None
+        # Kısmi kâr-al durumu
+        self.tp1            = 0.0      # kısmi kâr seviyesi (1R)
+        self.orig_amount    = 0.0      # açılıştaki tam miktar (kısmi oran için)
+        self.partial_done   = False    # yarısı kısmi alındı mı
 
     def open(self, side: str, price: float, atr: float, amount: float, leverage: int = None):
         cfg  = CONFIG
         cost = (cfg["commission"] + cfg["slippage"]) * 2
+
+        # Kısmi kâr açıksa nihai TP daha uzağa (runner_rr), değilse normal rr_ratio.
+        partial = cfg.get("partial_tp_enabled")
+        rr      = cfg["partial_runner_rr"] if partial else cfg["rr_ratio"]
 
         if side == "LONG":
             sl_atr  = price - atr * cfg["atr_sl_mult"]
@@ -1032,7 +1048,8 @@ class Position:
             sl_hmin = price * (1 - cfg["min_sl_pct"])
             self.stop_loss   = round(min(max(sl_atr, sl_hmax), sl_hmin), 6)
             sl_dist          = price - self.stop_loss
-            self.take_profit = round(price + sl_dist * cfg["rr_ratio"] + price * cost, 6)
+            self.take_profit = round(price + sl_dist * rr + price * cost, 6)
+            self.tp1         = round(price + sl_dist * cfg["partial_tp_r"], 6) if partial else 0.0
             self.trail_sl    = self.stop_loss
             self.peak        = price
             self.valley      = 0.0
@@ -1042,10 +1059,14 @@ class Position:
             sl_hmin = price * (1 + cfg["min_sl_pct"])
             self.stop_loss   = round(max(min(sl_atr, sl_hmax), sl_hmin), 6)
             sl_dist          = self.stop_loss - price
-            self.take_profit = round(price - sl_dist * cfg["rr_ratio"] - price * cost, 6)
+            self.take_profit = round(price - sl_dist * rr - price * cost, 6)
+            self.tp1         = round(price - sl_dist * cfg["partial_tp_r"], 6) if partial else 0.0
             self.trail_sl    = self.stop_loss
             self.valley      = price
             self.peak        = 0.0
+
+        self.orig_amount  = amount
+        self.partial_done = False
 
         self.active      = True
         self.side        = side
@@ -1058,10 +1079,12 @@ class Position:
 
         sl_pct = abs(price - self.stop_loss)   / price * 100
         tp_pct = abs(price - self.take_profit) / price * 100
+        tp1_line = (f"\n   TP1   : {self.tp1:,.6f}  (+%{abs(price-self.tp1)/price*100:.2f}) "
+                    f"→ yarısını kapat, stop başabaşa") if self.tp1 > 0 else ""
         log.info(
             f"📈 [{self.symbol}] {side} AÇILDI\n"
             f"   Giriş : {price:,.6f}  ATR: {atr:,.6f}\n"
-            f"   SL    : {self.stop_loss:,.6f}  (-%{sl_pct:.2f})\n"
+            f"   SL    : {self.stop_loss:,.6f}  (-%{sl_pct:.2f}){tp1_line}\n"
             f"   TP    : {self.take_profit:,.6f}  (+%{tp_pct:.2f})\n"
             f"   R:R   : 1:{tp_pct/sl_pct:.1f}  Miktar: {self.amount:.6f}"
         )
@@ -1119,6 +1142,63 @@ class Position:
             if trailing_active:
                 return price >= self.trail_sl
             return False
+
+    def partial_ready(self, price: float) -> bool:
+        """+1R'ye (tp1) ulaşıldı ve henüz kısmi alınmadıysa True."""
+        if not CONFIG.get("partial_tp_enabled") or self.partial_done or not self.active:
+            return False
+        if self.tp1 <= 0:
+            return False
+        return price >= self.tp1 if self.side == "LONG" else price <= self.tp1
+
+    def apply_partial(self, price: float) -> float:
+        """Pozisyonun partial_tp_frac kadarını (yarısını) kapatır: kârı kaydeder,
+        kalan miktarı düşürür, stop'u başabaşa çeker. Kapatılan miktarı döner."""
+        cfg       = CONFIG
+        close_amt = round(self.orig_amount * cfg["partial_tp_frac"], 8)
+
+        pnl_pct = (price / self.entry_price - 1) * 100 if self.side == "LONG" \
+                  else (self.entry_price / price - 1) * 100
+        pnl_lev = pnl_pct * self.leverage
+        cost    = (cfg["commission"] + cfg["slippage"]) * 2 * 100 * self.leverage
+        pnl_net = pnl_lev - cost
+        margin  = close_amt * self.entry_price / self.leverage if self.entry_price > 0 else cfg["trade_usdt"]
+        pnl_usdt = margin * pnl_net / 100
+
+        pnl_tracker.record(pnl_net, margin)          # kısmi kârı günlük/oturum PnL'e ekle
+
+        # kalan miktar + başabaş stop
+        self.amount       = round(self.amount - close_amt, 8)
+        self.partial_done = True
+        be = round(self.entry_price * (1.0001 if self.side == "LONG" else 0.9999), 6)
+        if self.side == "LONG":
+            self.stop_loss = max(self.stop_loss, be)
+        else:
+            self.stop_loss = min(self.stop_loss, be) if self.stop_loss > 0 else be
+
+        log.info(
+            f"💰 [{self.symbol}] KISMİ KÂR: yarısı kapatıldı @ {price:,.6f} "
+            f"(net {pnl_net:+.2f}%, {pnl_usdt:+.2f} USDT)\n"
+            f"   Kalan {self.amount:.6f} koşuyor → stop başabaşa {self.stop_loss:,.6f}, hedef {self.take_profit:,.6f}"
+        )
+        # CSV: kısmi kapanış da günlüğe yazılsın
+        sn = self.entry_snapshot or {}
+        write_trade_log({
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": self.symbol.split("/")[0], "side": self.side,
+            "entry": self.entry_price, "exit": round(price, 6),
+            "pnl_net_pct": round(pnl_net, 2), "pnl_usdt": round(pnl_usdt, 2),
+            "reason": "PARTIAL_TP", "dur_min": int((time.time() - self.open_time) / 60) if self.open_time else 0,
+            "leverage": self.leverage, "adx": sn.get("adx", ""), "daily": sn.get("daily", ""),
+            "tf1h": sn.get("tf1h", ""), "tf5": sn.get("tf5", ""), "tf15": sn.get("tf15", ""),
+            "score": sn.get("score", ""), "stoch": sn.get("stoch", ""), "rsi": sn.get("rsi", ""),
+            "macd": sn.get("macd", ""), "vol": sn.get("vol", ""), "st": sn.get("st", ""), "ema": sn.get("ema", ""),
+        })
+        coin = self.symbol.split("/")[0]
+        notify(f"💰 <b>{coin} {self.side} KISMİ KÂR</b> (yarısı)\n"
+               f"@ {price:g}  PnL: {pnl_net:+.2f}% ({pnl_usdt:+.2f} USDT)\n"
+               f"Kalan yarı koşuyor, stop başabaşa çekildi.")
+        return close_amt
 
     def check_exit(self, price: float) -> str | None:
         if not self.active:
@@ -1180,7 +1260,8 @@ class Position:
         margin  = (self.amount * self.entry_price / self.leverage) if self.entry_price > 0 else cfg["trade_usdt"]
         pnl_usdt = margin * pnl_net / 100
         pnl_tracker.record(pnl_net, margin)
-        if reason == "STOP_LOSS":
+        if reason == "STOP_LOSS" and pnl_net < -1.0:
+            # sadece GERÇEK zararlı stop coin yasağı saysın; başabaş (kısmi sonrası) sayılmaz
             pnl_tracker.register_sl(self.symbol)   # günlük coin yasağı sayacı
 
         # ── İşlem günlüğü (CSV) ──
@@ -1717,6 +1798,20 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
             if ok:
                 pos.close(price, "BTC_DUMP")
             return
+
+        # Kısmi kâr: +1R'ye geldiyse yarısını kapat, kalan yarı koşmaya devam etsin.
+        if pos.partial_ready(price):
+            close_amt = round(pos.orig_amount * cfg["partial_tp_frac"], 8)
+            ok = send_close(ex, symbol, pos.side, close_amt, price)
+            if ok:
+                pos.apply_partial(price)
+                # kalan yarı için başabaş stop'u borsaya yansıt
+                if cfg.get("sync_trailing_to_exchange") and not cfg["dry_run"]:
+                    try:
+                        update_exchange_stop(ex, pos)
+                    except Exception:
+                        pass
+            # pozisyon hâlâ açık → return YOK, aynı döngüde çıkış da kontrol edilebilir
 
         reason = pos.check_exit(price)
         if reason:
