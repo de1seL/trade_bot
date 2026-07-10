@@ -133,6 +133,11 @@ CONFIG = {
     # ── Hacim (entry_tf) ─────────────────────────────────────
     "vol_period"          : 20,
     "vol_mult"            : 1.0,
+    # Para akışı: skordaki zayıf "hacim büyüklüğü" koşulu yerine CMF (yönlü
+    # alım/satım baskısı) kullan. Farklı bilgi ailesi → set decorrelate olur.
+    # (Eski hacim koşuluna dönmek için use_cmf=False.)
+    "use_cmf"             : True,
+    "cmf_period"          : 20,
 
     # ── Bollinger Bands (entry_tf) — AŞIRI-UZAMA FİLTRESİ ──
     "bb_period"           : 20,
@@ -842,13 +847,24 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     df["bb_lo"]  = bb.bollinger_lband()
     df["bb_mid"] = bb.bollinger_mavg()
 
+    # ── CMF (Chaikin Money Flow) — yönlü para akışı ──────────
+    if cfg.get("use_cmf", True):
+        df["cmf"] = ta.volume.ChaikinMoneyFlowIndicator(
+            df["high"], df["low"], df["close"], df["volume"], window=cfg["cmf_period"]
+        ).chaikin_money_flow()
+    else:
+        df["cmf"] = 0.0
+
     last  = df.iloc[-1]
     prev  = df.iloc[-2]
     price = float(last["close"])
     coin_chg_1h = (price - float(prev["close"])) / float(prev["close"])
 
     # NaN kontrolü
-    for col in ["sk","sd","macd","msig","st","atr","vol_ma","rsi","bb_up","bb_lo"]:
+    _need = ["sk","sd","macd","msig","st","atr","vol_ma","rsi","bb_up","bb_lo"]
+    if cfg.get("use_cmf", True):
+        _need.append("cmf")
+    for col in _need:
         if pd.isna(last[col]):
             return None
 
@@ -881,6 +897,14 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     st_short = int(last["std"]) == -1
     vol_ok   = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
 
+    # CMF: yönlü para akışı (skorda hacim yerine bu kullanılır)
+    cmf_val   = float(last["cmf"])
+    cmf_long  = cmf_val > 0
+    cmf_short = cmf_val < 0
+    # Skorda "para akışı" slotu: CMF açıksa yön, değilse eski hacim büyüklüğü
+    flow_long  = cmf_long  if cfg.get("use_cmf", True) else vol_ok
+    flow_short = cmf_short if cfg.get("use_cmf", True) else vol_ok
+
     # Bollinger aşırı-uzama
     bb_up_lvl = float(last["bb_up"]); bb_lo_lvl = float(last["bb_lo"])
     _band = bb_up_lvl - bb_lo_lvl
@@ -891,8 +915,8 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor.
     # MACD veri analizinde zarar getirdiği için config ile skordan çıkarılabilir.
     _use_macd_score = cfg.get("macd_in_score", True)
-    long_score  = sum([stoch_long,  rsi_long,  vol_ok, st_long]  + ([macd_up]   if _use_macd_score else []))
-    short_score = sum([stoch_short, rsi_short, vol_ok, st_short] + ([macd_down] if _use_macd_score else []))
+    long_score  = sum([stoch_long,  rsi_long,  flow_long,  st_long]  + ([macd_up]   if _use_macd_score else []))
+    short_score = sum([stoch_short, rsi_short, flow_short, st_short] + ([macd_down] if _use_macd_score else []))
 
     # ── Tetikleyiciler ───────────────────────────────────────
     # MACD tetikte zarar getirdiği için config ile çıkarılabilir → sadece StochRSI tetik.
@@ -924,6 +948,11 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
         "vol_ok"      : vol_ok,
         "volume"      : float(last["volume"]),
         "vol_ma"      : float(last["vol_ma"]),
+        "cmf"         : round(cmf_val, 4),
+        "cmf_long"    : cmf_long,
+        "cmf_short"   : cmf_short,
+        "flow_long"   : flow_long,
+        "flow_short"  : flow_short,
         "bb_up"       : round(bb_up_lvl, 6),
         "bb_lo"       : round(bb_lo_lvl, 6),
         "bb_over_long"  : bb_over_long,
@@ -1678,6 +1707,7 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
     _use_macd = cfg.get("macd_in_score", True)
     _maxsc    = 5 if _use_macd else 4
     _macd_disp = (lambda b: f" MACD{t(b)}") if _use_macd else (lambda b: f" MACD{'🔘' if b else '·'}(off)")
+    _flow_lbl  = "CMF" if cfg.get("use_cmf", True) else "Hacim"
     sl_p = entry["atr"] * cfg["atr_sl_mult"] / entry["price"] * 100
     sl_p = min(max(sl_p, cfg["min_sl_pct"] * 100), cfg["max_sl_pct"] * 100)
     tp_p = sl_p * cfg["rr_ratio"]
@@ -1711,14 +1741,15 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  StochRSI: K={entry['sk']:.1f}  D={entry['sd']:.1f}   RSI: {entry['rsi']:.1f}\n"
         f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}\n"
         f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}\n"
-        f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}\n"
+        f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}   "
+        f"CMF: {entry.get('cmf', 0):+.3f} {'🟢alım' if entry.get('cmf',0)>0 else '🔴satım' if entry.get('cmf',0)<0 else '➖'}\n"
         f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
         f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
         f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
         f"  LONG ({entry['long_score']}/{_maxsc}, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])}{_macd_disp(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
+        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])}{_macd_disp(entry['macd_up'])} {_flow_lbl}{t(entry.get('flow_long', entry['vol_ok']))} ST{t(entry['st_long'])}\n"
         f"  SHORT({entry['short_score']}/{_maxsc}, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])}{_macd_disp(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
+        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])}{_macd_disp(entry['macd_down'])} {_flow_lbl}{t(entry.get('flow_short', entry['vol_ok']))} ST{t(entry['st_short'])}\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -1980,6 +2011,7 @@ def main():
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
     log.info(f"  Min Koşul  : {cfg['min_conditions']}/{5 if cfg.get('macd_in_score', True) else 4} koşul + zorunlu tetik + EMA9/20/50 kapısı")
     log.info(f"  MACD       : tetik={'açık' if cfg.get('macd_in_trigger', True) else 'KAPALI'}  skor={'açık' if cfg.get('macd_in_score', True) else 'KAPALI'} (veri: geç sinyal)")
+    log.info(f"  Para Akışı : {'CMF (yönlü)' if cfg.get('use_cmf', True) else 'Hacim büyüklüğü'} → skorda para-akışı slotu")
     log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
     log.info(f"  Coin Yasağı: günde {cfg.get('daily_coin_ban_sl', 0)} SL → o coin gün sonuna kadar yasak")
