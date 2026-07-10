@@ -74,7 +74,7 @@ CONFIG = {
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
         "DOT/USDT:USDT",
     ],
-    "top_volatile_count"  : 100,          # en volatil/likit ilk 100 coin (+ core = ~110)
+    "top_volatile_count"  : 65,           # en volatil/likit ilk 65 coin (+ core = ~75) — kalite/hız dengesi
     "symbol_refresh_sec"  : 900,          # coin listesini 15 dk'da bir yenile (paralel)
 
     # ── Tarama filtreleri ───────────────────────────────────
