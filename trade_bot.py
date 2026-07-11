@@ -124,8 +124,8 @@ CONFIG = {
     # Veri analizi: MACD crossover TRUE iken WR %30, FALSE iken %56 → MACD geç
     # sinyal, tepeden alım yaptırıyor. Tetikten ve skordan çıkarıldı.
     # (Geri açmak için ikisini True yap.)
-    "macd_in_trigger"     : False,          # MACD zorunlu tetiğe dahil mi
-    "macd_in_score"       : False,          # MACD skora dahil mi
+    "macd_in_trigger"     : True,           # MACD zorunlu tetiğe dahil mi (5 koşullu set: açık)
+    "macd_in_score"       : True,           # MACD skora dahil mi (5 koşullu set: açık)
 
     # ── Süper Trend (entry_tf) ──────────────────────────────
     "st_period"           : 10,
@@ -137,15 +137,15 @@ CONFIG = {
     # Para akışı: skordaki zayıf "hacim büyüklüğü" koşulu yerine CMF (yönlü
     # alım/satım baskısı) kullan. Farklı bilgi ailesi → set decorrelate olur.
     # (Eski hacim koşuluna dönmek için use_cmf=False.)
-    "use_cmf"             : True,
+    "use_cmf"             : False,         # Hacim koşulu geri (CMF kapalı) — kullanıcı isteği
     "cmf_period"          : 20,
     # ── Decorrelated set: her koşul FARKLI aileden ──────────
     # Skor = RSI(momentum) + CMF(para akışı) + SuperTrend(trend) + Donchian(yapı).
     # StochRSI skordan çıkarıldı (RSI ile aynı aile = momentum tekrarı).
     # Tetik = Donchian kırılımı VEYA RSI 50 orta çizgi geçişi (taze olay).
-    "use_donchian"        : True,          # Donchian kırılımı skora + tetiğe (yapı ailesi)
+    "use_donchian"        : False,         # Donchian kapalı (5 koşullu klasik set)
     "donchian_period"     : 14,            # önceki kaç mumun zirvesi/dibi kırılsın (kısa=sık kırılım)
-    "stochrsi_in_score"   : False,         # StochRSI skorda mı (False = momentum tekrarını kaldır)
+    "stochrsi_in_score"   : True,          # StochRSI skorda (5 koşullu set: açık)
     "stochrsi_in_trigger" : True,          # StochRSI dönüşü TETİĞE dahil (skora değil) → yeterli tetik frekansı
 
     # ── Bollinger Bands (entry_tf) — AŞIRI-UZAMA FİLTRESİ ──
@@ -187,8 +187,7 @@ CONFIG = {
     "partial_runner_rr"   : 3.0,          # kalan yarının hedefi (R cinsinden, eski 1.5 yerine)
 
     # ── Giriş eşiği ─────────────────────────────────────────
-    "min_conditions"      : 2,    # 4 BAĞIMSIZ koşuldan en az 2 (+ zorunlu tetik). Bağımsız
-                                   # set nadiren hizalandığı için 2 ≈ eski korele 3. 1h ters ise +1.
+    "min_conditions"      : 3,    # 5 koşuldan en az 3'ü (+ zorunlu tetik). 1h ters ise +1.
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
