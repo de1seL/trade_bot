@@ -174,9 +174,10 @@ CONFIG = {
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
     "max_positions"       : 2,
-    # Korelasyon koruması: aynı YÖNDE en fazla kaç pozisyon. 1 → en fazla 1 LONG + 1 SHORT
-    # (2 alt coin aynı yönde = aslında tek büyük bahis; BTC dönerse ikisi birden batar).
-    "max_per_direction"   : 1,
+    # Korelasyon koruması: aynı YÖNDE en fazla kaç pozisyon. 2 → 2 slotun ikisi de
+    # aynı yön olabilir. Veri: slotlar %67 boştu, yön limiti işlemi kısıyordu → 1'den 2'ye.
+    # (Bedeli: 2 aynı-yön pozisyon korelasyon riski; toplam maruziyet yine %40 tavanlı.)
+    "max_per_direction"   : 2,
     # ── Para yönetimi (DİNAMİK) ──────────────────────────────
     # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
     # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
