@@ -74,12 +74,12 @@ CONFIG = {
         "ADA/USDT:USDT",  "AVAX/USDT:USDT", "LINK/USDT:USDT",
         "DOT/USDT:USDT",
     ],
-    "top_volatile_count"  : 40,
+    "top_volatile_count"  : 80,           # 40→80: aday havuzunu 2 kat (giriş kalitesi min 3 ile korunur)
     "symbol_refresh_sec"  : 900,          # coin listesini 15 dk'da bir yenile (paralel)
 
     # ── Tarama filtreleri ───────────────────────────────────
     "exclude_bases"       : ["BTC", "BNB"],
-    "min_volatility_pct"  : 4.0,
+    "min_volatility_pct"  : 3.0,          # 4→3: biraz daha çok coin havuza girsin
     "min_listing_days"    : 45,
 
     # ── Kaldıraç ────────────────────────────────────────────
@@ -237,7 +237,7 @@ CONFIG = {
     # Paralel tarama: aday coinlerin mumlarını 5 thread ile aynı anda çekip cache'i
     # ısıtır → döngü çok daha hızlı. SADECE veri çekme paralel; emirler yine SIRALI.
     "parallel_scan"       : True,
-    "scan_workers"        : 5,
+    "scan_workers"        : 8,            # 80 coin taranırken paralel veri çekmeyi hızlı tut
     "loop_sec"            : 15,
     "dry_run"             : False,
 }
