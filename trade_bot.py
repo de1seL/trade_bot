@@ -197,7 +197,7 @@ CONFIG = {
     "balance_refresh_sec" : 300,
     "cooldown_sl_sec"     : 3600,
     "cooldown_tp_sec"     : 3600,
-    "max_pos_hours"       : 4,
+    "max_pos_hours"       : 3,              # 4→3: ölü işlemler kıt 2 slotu erken bıraksın → daha çok işlem (risksiz)
     "max_spread_pct"      : 0.0015,
 
     # ── Trailing senkron ─────────────────────────────────────
