@@ -101,7 +101,7 @@ CONFIG = {
     "adx_max"             : 48,             # ADX bunun ÜSTÜNDEyse trend YORGUN → giriş yok (tepeden alım freni)
 
     # ── Günlük coin yasağı ───────────────────────────────────
-    "daily_coin_ban_sl"   : 2,              # bir coin günde bu kadar SL yerse o gün TAMAMEN yasak (tekrar-deneme freni)
+    "daily_coin_ban_sl"   : 1,              # 1 SL → o coin o gün yasak. Veri: EVAA/ESPORTS tekrar-stopları (+2.94 kurtarır)
 
     # ── Stochastic RSI (entry_tf) ────────────────────────────
     "stoch_period"        : 14,
@@ -168,7 +168,7 @@ CONFIG = {
     "partial_runner_rr"   : 3.0,          # kalan yarının hedefi (R cinsinden, eski 1.5 yerine)
 
     # ── Giriş eşiği ─────────────────────────────────────────
-    "min_conditions"      : 2,    # 5 koşuldan en az 2'si (+ zorunlu tetik). 3'e döndürmek için: 3 yaz.
+    "min_conditions"      : 3,    # 5 koşuldan en az 3'ü. Veri: score 2 → WR%29 -6.34, score 3+ → WR%74 +9.36.
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
