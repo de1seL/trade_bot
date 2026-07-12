@@ -19,10 +19,11 @@
     EMA20 < EMA50 → aşağı momentum (SHORT)
 
   KATMAN 4 — GİRİŞ (1 saat, min koşul + ZORUNLU taze tetik)
-    Skor koşulları (6): StochRSI dönüş, RSI momentum, MACD crossover,
-                        Hacim artışı, Süper Trend yönü, EMA9/20/50 hizalama
-    Tetik (≥1 şart): MACD crossover VEYA StochRSI dönüşü
-    Tüm sinyaller KAPANMIŞ mumdan hesaplanır (repaint yok)
+    SADE SET (5 indikatör): EMA + ADX + RSI + ATR + Volume
+    Skor koşulları (4): EMA9/20/50 hizalama, RSI momentum,
+                        Hacim artışı, ADX güç+artış
+    Tetik (≥1 şart): RSI-50 orta çizgi geçişi VEYA EMA9/EMA20 kesişimi
+    ATR → SL/TP boyutu. Tüm sinyaller KAPANMIŞ mumdan (repaint yok)
 
 ── ÇIKIŞ ────────────────────────────────────────────────────────
   SL      : ATR × 1.3  (min %1.2, max %3.0)
@@ -132,7 +133,7 @@ CONFIG = {
     # ── Bollinger Bands (entry_tf) — AŞIRI-UZAMA FİLTRESİ ──
     "bb_period"           : 20,
     "bb_std"              : 2.0,
-    "bb_filter_enabled"   : True,
+    "bb_filter_enabled"   : False,        # Bollinger çıkarıldı (sade set: EMA+ADX+RSI+ATR+Volume)
     "bb_ext_frac"         : 0.0,
 
     # ── EMA9/20/50 Hizalama (entry_tf) ──────────────────────
@@ -168,7 +169,7 @@ CONFIG = {
     "partial_runner_rr"   : 3.0,          # kalan yarının hedefi (R cinsinden, eski 1.5 yerine)
 
     # ── Giriş eşiği ─────────────────────────────────────────
-    "min_conditions"      : 3,    # 5 koşuldan en az 3'ü. Veri: score 2 → WR%29 -6.34, score 3+ → WR%74 +9.36.
+    "min_conditions"      : 2,    # 4 SADE koşuldan (EMA+RSI+Hacim+ADX) en az 2'si + zorunlu tetik.
     "require_trigger"     : True,
 
     # ── Risk ─────────────────────────────────────────────────
@@ -784,47 +785,15 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     # Kısa için: EMA9 < EMA20 < EMA50
     ema_short_ok = ema9_lt_20 and ema20_lt_50
 
-    # ── StochRSI ─────────────────────────────────────────────
-    stoch = ta.momentum.StochRSIIndicator(
-        df["close"], window=cfg["stoch_period"],
-        smooth1=cfg["stoch_smooth_k"], smooth2=cfg["stoch_smooth_d"]
-    )
-    df["sk"] = stoch.stochrsi_k() * 100
-    df["sd"] = stoch.stochrsi_d() * 100
+    df["ema9"] = ema9; df["ema20"] = ema20   # EMA9/20 kesişimi (tetik) için sakla
 
     # ── RSI ──────────────────────────────────────────────────
-    df["rsi"] = ta.momentum.RSIIndicator(
-        df["close"], window=cfg["rsi_period"]
-    ).rsi()
+    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=cfg["rsi_period"]).rsi()
 
-    # ── MACD ─────────────────────────────────────────────────
-    macd_obj = ta.trend.MACD(df["close"], window_slow=cfg["macd_slow"], window_fast=cfg["macd_fast"], window_sign=cfg["macd_sig"])
-    df["macd"]  = macd_obj.macd()
-    df["msig"]  = macd_obj.macd_signal()
-
-    # ── Süper Trend ──────────────────────────────────────────
-    atr_st = ta.volatility.AverageTrueRange(
-        df["high"], df["low"], df["close"], window=cfg["st_period"]
-    ).average_true_range()
-    hl2    = (df["high"] + df["low"]) / 2
-    ur = (hl2 + cfg["st_mult"] * atr_st).values
-    lr = (hl2 - cfg["st_mult"] * atr_st).values
-    cl = df["close"].values
-    u  = ur.copy(); lo = lr.copy()
-    st = ur.copy() * np.nan
-    sd = np.ones(len(df), dtype=int)
-    for i in range(1, len(df)):
-        u[i]  = ur[i] if (ur[i] < u[i-1]  or cl[i-1] > u[i-1])  else u[i-1]
-        lo[i] = lr[i] if (lr[i] > lo[i-1] or cl[i-1] < lo[i-1]) else lo[i-1]
-        if i < cfg["st_period"]:
-            st[i] = np.nan; sd[i] = 1
-        elif sd[i-1] == 1:
-            sd[i] = -1 if cl[i] < lo[i] else 1
-        else:
-            sd[i] =  1 if cl[i] > u[i]  else -1
-        st[i] = lo[i] if sd[i] == 1 else u[i]
-    df["st"]  = st
-    df["std"] = sd
+    # ── ADX (entry tf) — trend gücü ──────────────────────────
+    df["adx"] = ta.trend.ADXIndicator(
+        df["high"], df["low"], df["close"], window=cfg["adx_period"]
+    ).adx()
 
     # ── ATR & Hacim ──────────────────────────────────────────
     df["atr"]   = ta.volatility.AverageTrueRange(
@@ -832,92 +801,77 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     ).average_true_range()
     df["vol_ma"] = df["volume"].rolling(cfg["vol_period"]).mean()
 
-    # ── Bollinger Bands ──────────────────────────────────────
-    bb = ta.volatility.BollingerBands(df["close"], window=cfg["bb_period"], window_dev=cfg["bb_std"])
-    df["bb_up"]  = bb.bollinger_hband()
-    df["bb_lo"]  = bb.bollinger_lband()
-    df["bb_mid"] = bb.bollinger_mavg()
-
     last  = df.iloc[-1]
     prev  = df.iloc[-2]
     price = float(last["close"])
     coin_chg_1h = (price - float(prev["close"])) / float(prev["close"])
 
     # NaN kontrolü
-    for col in ["sk","sd","macd","msig","st","atr","vol_ma","rsi","bb_up","bb_lo"]:
+    for col in ["rsi","adx","atr","vol_ma"]:
         if pd.isna(last[col]):
             return None
 
-    # ── MACD Crossover ───────────────────────────────────────
-    lb   = cfg["macd_lookback"]
-    win  = df.tail(lb + 1)
-    macd_up = macd_down = False
-    for i in range(len(win) - 1):
-        p = win.iloc[i]; c = win.iloc[i+1]
-        if p["macd"] <= p["msig"] and c["macd"] > c["msig"]:
-            macd_up   = True
-        if p["macd"] >= p["msig"] and c["macd"] < c["msig"]:
-            macd_down = True
+    lb = cfg.get("macd_lookback", 5)   # tetik "taze olay" penceresi (mum sayısı)
 
-    sk = float(last["sk"]); sd2 = float(last["sd"])
-    stoch_series = df["sk"].dropna()
-    sk_rising  = len(stoch_series) >= 3 and float(stoch_series.iloc[-1]) > float(stoch_series.iloc[-3])
-    sk_falling = len(stoch_series) >= 3 and float(stoch_series.iloc[-1]) < float(stoch_series.iloc[-3])
-    stoch_long  = sk > cfg["stoch_oversold"]  and sk > sd2 and sk_rising
-    stoch_short = sk < cfg["stoch_overbought"] and sk < sd2 and sk_falling
-
+    # ── RSI momentum + 50 orta çizgi geçişi ──────────────────
     rsi_val   = float(last["rsi"])
     rsi_series  = df["rsi"].dropna()
     rsi_rising  = len(rsi_series) >= 3 and float(rsi_series.iloc[-1]) > float(rsi_series.iloc[-3])
     rsi_falling = len(rsi_series) >= 3 and float(rsi_series.iloc[-1]) < float(rsi_series.iloc[-3])
     rsi_long  = rsi_val > cfg["rsi_oversold"]   and rsi_rising
     rsi_short = rsi_val < cfg["rsi_overbought"] and rsi_falling
+    rsi_cross_up = rsi_cross_dn = False
+    if len(rsi_series) >= 2:
+        _wr = rsi_series.iloc[-(lb+1):]
+        for i in range(len(_wr) - 1):
+            a = float(_wr.iloc[i]); b = float(_wr.iloc[i+1])
+            if a <= 50 < b: rsi_cross_up = True
+            if a >= 50 > b: rsi_cross_dn = True
 
-    st_long  = int(last["std"]) == 1
-    st_short = int(last["std"]) == -1
-    vol_ok   = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
+    # ── EMA9/EMA20 kesişimi (tetik) ──────────────────────────
+    ema_cross_up = ema_cross_dn = False
+    e9 = df["ema9"].dropna().values; e20 = df["ema20"].dropna().values
+    n = min(len(e9), len(e20), lb + 1)
+    if n >= 2:
+        s9 = e9[-n:]; s20 = e20[-n:]
+        for i in range(len(s9) - 1):
+            if s9[i] <= s20[i] and s9[i+1] > s20[i+1]: ema_cross_up = True
+            if s9[i] >= s20[i] and s9[i+1] < s20[i+1]: ema_cross_dn = True
 
-    # Bollinger aşırı-uzama
-    bb_up_lvl = float(last["bb_up"]); bb_lo_lvl = float(last["bb_lo"])
-    _band = bb_up_lvl - bb_lo_lvl
-    bb_over_long  = price > bb_up_lvl + cfg["bb_ext_frac"] * _band
-    bb_over_short = price < bb_lo_lvl - cfg["bb_ext_frac"] * _band
+    # ── ADX: güç + artış (skor koşulu) ───────────────────────
+    adx_val = float(last["adx"])
+    adx_series = df["adx"].dropna()
+    adx_rising = len(adx_series) >= 3 and float(adx_series.iloc[-1]) > float(adx_series.iloc[-3])
+    adx_strong = adx_val >= cfg["adx_threshold"] and adx_rising
 
-    # ── Skor hesaplama (6 koşul) ─────────────────────────────
-    # EMA9/20/50 hizalaması SKORDA DEĞİL — calc_entry_trend'de KAPI olarak kullanılıyor
-    # (çifte sayımı önlemek için burada sayılmaz). Skor: 5 bağımsız koşul.
-    long_score  = sum([stoch_long,  rsi_long,  macd_up,   vol_ok, st_long])
-    short_score = sum([stoch_short, rsi_short, macd_down, vol_ok, st_short])
+    # ── Hacim ────────────────────────────────────────────────
+    vol_ok = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
 
-    # ── Tetikleyiciler ───────────────────────────────────────
-    long_trigger  = macd_up   or stoch_long
-    short_trigger = macd_down or stoch_short
+    # ── SKOR: 4 SADE koşul (EMA + RSI + Hacim + ADX) ─────────
+    long_score  = sum([ema_long_ok,  rsi_long,  vol_ok, adx_strong])
+    short_score = sum([ema_short_ok, rsi_short, vol_ok, adx_strong])
+
+    # ── Tetik: RSI-50 geçişi VEYA EMA9/20 kesişimi ───────────
+    long_trigger  = rsi_cross_up or ema_cross_up
+    short_trigger = rsi_cross_dn or ema_cross_dn
 
     return {
         "price"       : round(price, 6),
         "atr"         : round(float(last["atr"]), 6),
         "coin_chg_1h" : round(coin_chg_1h, 4),
-        "sk"          : round(sk, 1),
-        "sd"          : round(sd2, 1),
         "rsi"         : round(rsi_val, 1),
         "rsi_long"    : rsi_long,
         "rsi_short"   : rsi_short,
-        "macd"        : round(float(last["macd"]), 6),
-        "msig"        : round(float(last["msig"]), 6),
-        "st_val"      : round(float(last["st"]), 6),
-        "st_long"     : st_long,
-        "st_short"    : st_short,
-        "stoch_long"  : stoch_long,
-        "stoch_short" : stoch_short,
-        "macd_up"     : macd_up,
-        "macd_down"   : macd_down,
+        "rsi_cross_up": rsi_cross_up,
+        "rsi_cross_dn": rsi_cross_dn,
+        "adx_entry"   : round(adx_val, 1),
+        "adx_strong"  : adx_strong,
+        "adx_rising"  : adx_rising,
+        "ema_cross_up": ema_cross_up,
+        "ema_cross_dn": ema_cross_dn,
         "vol_ok"      : vol_ok,
         "volume"      : float(last["volume"]),
         "vol_ma"      : float(last["vol_ma"]),
-        "bb_up"       : round(bb_up_lvl, 6),
-        "bb_lo"       : round(bb_lo_lvl, 6),
-        "bb_over_long"  : bb_over_long,
-        "bb_over_short" : bb_over_short,
         "ema_long_ok"   : ema_long_ok,
         "ema_short_ok"  : ema_short_ok,
         "ema9"          : round(float(ema9.iloc[-1]), 6),
@@ -1694,17 +1648,16 @@ def log_scan(sym, trend, entry, signal, pos, daily, entry_trend="NONE"):
         f"  ADX  : {trend['adx']:.1f}  {'✅ güçlü' if trend['adx_ok'] else '⬜ yatay'}\n"
         f"  Fiyat: {entry['price']:>16,.6f}   ATR: {entry['atr']:,.6f}\n"
         f"  SL±{sl_p:.2f}%  TP±{tp_p:.2f}%  R:R 1:{tp_p/sl_p:.1f}\n"
-        f"  StochRSI: K={entry['sk']:.1f}  D={entry['sd']:.1f}   RSI: {entry['rsi']:.1f}\n"
-        f"  MACD : {entry['macd']:.6f}  Sig: {entry['msig']:.6f}\n"
-        f"  ST   : {entry['st_val']:,.6f}  {'📈' if entry['st_long'] else '📉'}\n"
+        f"  RSI  : {entry['rsi']:.1f}   ADX(1h): {entry.get('adx_entry',0):.1f} {'📈artıyor' if entry.get('adx_rising') else '➖'}\n"
         f"  Hacim: {entry['volume']:.0f}  (Ort:{entry['vol_ma']:.0f})  {t(entry['vol_ok'])}\n"
-        f"  BB   : üst={entry['bb_up']:,.6f}  alt={entry['bb_lo']:,.6f}  "
-        f"{'⚠️ AŞIRI-UZAMA (giriş engel)' if (entry['bb_over_long'] or entry['bb_over_short']) else '✅ bant içi'}\n"
         f"  EMA Kapı: {'✅ hizalı' if (entry['ema_long_ok'] or entry['ema_short_ok']) else '⬜ hizasız'}\n"
-        f"  LONG ({entry['long_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_long'])} RSI{t(entry['rsi_long'])} MACD{t(entry['macd_up'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_long'])}\n"
-        f"  SHORT({entry['short_score']}/5, min={cfg['min_conditions']}): "
-        f"StochRSI{t(entry['stoch_short'])} RSI{t(entry['rsi_short'])} MACD{t(entry['macd_down'])} Hacim{t(entry['vol_ok'])} ST{t(entry['st_short'])}\n"
+        f"  LONG ({entry['long_score']}/4, min={cfg['min_conditions']}): "
+        f"EMA{t(entry['ema_long_ok'])} RSI{t(entry['rsi_long'])} Hacim{t(entry['vol_ok'])} ADX{t(entry['adx_strong'])}\n"
+        f"  SHORT({entry['short_score']}/4, min={cfg['min_conditions']}): "
+        f"EMA{t(entry['ema_short_ok'])} RSI{t(entry['rsi_short'])} Hacim{t(entry['vol_ok'])} ADX{t(entry['adx_strong'])}\n"
+        f"  Tetik: L{t(entry['long_trigger'])} S{t(entry['short_trigger'])} "
+        f"(RSI50↑{t(entry.get('rsi_cross_up'))}↓{t(entry.get('rsi_cross_dn'))} "
+        f"EMA×↑{t(entry.get('ema_cross_up'))}↓{t(entry.get('ema_cross_dn'))})\n"
         f"  Sinyal: {signal}   Pozisyon: {pos.side if pos.active else 'YOK'}"
         f"{trail_info}\n"
         f"{'─'*54}"
@@ -1903,12 +1856,13 @@ def run_symbol(ex, symbol, pos, positions, btc_chg: float = 0.0, live_pos=None, 
                     pos.entry_snapshot = {
                         "adx": trend["adx"], "daily": daily, "tf1h": entry_trend, "tf5": tf5, "tf15": tf15,
                         "score": entry["long_score"] if L else entry["short_score"],
-                        "stoch": entry["stoch_long"] if L else entry["stoch_short"],
-                        "rsi":   entry["rsi_long"]   if L else entry["rsi_short"],
-                        "macd":  entry["macd_up"]    if L else entry["macd_down"],
-                        "vol":   entry["vol_ok"],
-                        "st":    entry["st_long"]    if L else entry["st_short"],
-                        "ema":   entry["ema_long_ok"] if L else entry["ema_short_ok"],
+                        # CSV sütunları korundu, sade sete göre yeniden eşlendi:
+                        "stoch": entry["adx_strong"],                                   # ADX güç+artış
+                        "rsi":   entry["rsi_long"]   if L else entry["rsi_short"],       # RSI momentum
+                        "macd":  entry["ema_cross_up"] if L else entry["ema_cross_dn"],  # EMA9/20 kesişim tetiği
+                        "vol":   entry["vol_ok"],                                        # Hacim
+                        "st":    entry["rsi_cross_up"] if L else entry["rsi_cross_dn"],  # RSI-50 geçiş tetiği
+                        "ema":   entry["ema_long_ok"] if L else entry["ema_short_ok"],   # EMA hizalaması
                     }
                     ok = send_open(ex, symbol, signal, pos.amount, price, pos.stop_loss, pos.take_profit)
                     if not ok:
@@ -1964,8 +1918,8 @@ def main():
         log.info(f"  Boyut      : sabit {cfg['trade_usdt']} USDT")
     log.info(f"  Zarar Freni: üst üste {cfg['consec_loss_limit']} zarar → {cfg['consec_loss_pause_hours']}s mola")
     log.info(f"  SL/TP      : SL ×{cfg['atr_sl_mult']} ATR (min %{cfg['min_sl_pct']*100:.1f})  R:R 1:{cfg['rr_ratio']:.1f}")
-    log.info(f"  Min Koşul  : {cfg['min_conditions']}/5 koşul + zorunlu tetik + EMA9/20/50 kapısı")
-    log.info(f"  BB Filtre  : {'açık (aşırı-uzamada girme)' if cfg.get('bb_filter_enabled', True) else 'kapalı'}")
+    log.info(f"  Skor Seti  : EMA + RSI + Hacim + ADX  (sade set: EMA+ADX+RSI+ATR+Volume)")
+    log.info(f"  Min Koşul  : {cfg['min_conditions']}/4 koşul + zorunlu tetik (RSI-50 geçiş / EMA9-20 kesişim)")
     log.info(f"  ADX Eşiği  : {cfg['adx_threshold']} – {cfg.get('adx_max', '∞')} (üstü yorgun trend → girme)")
     log.info(f"  Coin Yasağı: günde {cfg.get('daily_coin_ban_sl', 0)} SL → o coin gün sonuna kadar yasak")
     log.info(f"  Cooldown   : SL={cfg['cooldown_sl_sec']//60}dk  TP={cfg['cooldown_tp_sec']//60}dk")
