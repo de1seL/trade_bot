@@ -842,7 +842,7 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     adx_val = float(last["adx"])
     adx_series = df["adx"].dropna()
     adx_rising = len(adx_series) >= 3 and float(adx_series.iloc[-1]) > float(adx_series.iloc[-3])
-    adx_strong = adx_val >= cfg["adx_threshold"] and adx_rising
+    adx_strong = adx_val >= cfg["adx_threshold"]   # skorda: sadece güçlü (artış şartı kaldırıldı → daha sık katkı)
 
     # ── Hacim ────────────────────────────────────────────────
     vol_ok = float(last["volume"]) > float(last["vol_ma"]) * cfg["vol_mult"]
@@ -851,9 +851,11 @@ def calc_entry(df: pd.DataFrame) -> dict | None:
     long_score  = sum([ema_long_ok,  rsi_long,  vol_ok, adx_strong])
     short_score = sum([ema_short_ok, rsi_short, vol_ok, adx_strong])
 
-    # ── Tetik: RSI-50 geçişi VEYA EMA9/20 kesişimi ───────────
-    long_trigger  = rsi_cross_up or ema_cross_up
-    short_trigger = rsi_cross_dn or ema_cross_dn
+    # ── Tetik: taze kesişim VEYA trend-hizalı momentum ───────
+    # Sadece "taze RSI-50/EMA kesişimi" nadir olay → az işlem. Trend zaten hizalı
+    # ve momentum yönde ise (ema hizalı + RSI o yönde) de tetik say → yeterli frekans.
+    long_trigger  = rsi_cross_up or ema_cross_up or (ema_long_ok  and rsi_rising)
+    short_trigger = rsi_cross_dn or ema_cross_dn or (ema_short_ok and rsi_falling)
 
     return {
         "price"       : round(price, 6),
