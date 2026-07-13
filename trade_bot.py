@@ -83,7 +83,7 @@ CONFIG = {
     "min_listing_days"    : 45,
 
     # ── Kaldıraç ────────────────────────────────────────────
-    "leverage"            : 10,
+    "leverage"            : 5,            # sabit 5x (dynamic_leverage kapalı)
 
     # ── Zaman dilimleri ─────────────────────────────────────
     "daily_tf"            : "1d",
@@ -175,12 +175,12 @@ CONFIG = {
     "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
     # ⚠️ TEST (dry_run) AYARI: hızlı örneklem için 20 pozisyon. CANLIYA GEÇMEDEN
     #    ÖNCE max_positions=2, max_per_direction=2, total_exposure_pct=0.40 yap!
-    "max_positions"       : 20,           # TEST: aynı anda 20 işleme kadar
-    "max_per_direction"   : 20,           # TEST: yön limiti yok (örneklem büyüsün)
+    "max_positions"       : 10,           # TEST: aynı anda max 10 işlem
+    "max_per_direction"   : 10,           # TEST: yön limiti yok
     # ── Para yönetimi (DİNAMİK) ──────────────────────────────
     # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
     # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
-    "dynamic_leverage"    : True,
+    "dynamic_leverage"    : False,        # TEST: sabit boyut/kaldıraç (her işlem $10 marj, 5x)
     "position_pct"        : 0.20,         # her pozisyon marjı = bakiyenin %20'si
     "total_exposure_pct"  : 5.0,          # TEST: maruziyet tavanı açıldı (canlıda 0.40 yap!)
     "risk_per_trade_pct"  : 2.0,          # hedef risk: SL vurursa ~bakiyenin %2'si
