@@ -667,10 +667,18 @@ def get_btc_change(ex: ccxt.Exchange) -> float:
         return 0.0
 
 
+_price_err_last = 0.0
+
 def fetch_current_price(ex, symbol) -> float:
+    global _price_err_last
     try:
         return float(ex.fetch_ticker(symbol)["last"])
-    except Exception:
+    except Exception as e:
+        # Gerçek hatayı göster (30 sn'de bir, log'u boğmadan) → teşhis için
+        now = time.time()
+        if now - _price_err_last > 30:
+            _price_err_last = now
+            log.error(f"❌ Fiyat çekilemedi ({symbol}) — GERÇEK SEBEP: {type(e).__name__}: {e}")
         return None
 
 
