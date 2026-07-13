@@ -240,6 +240,7 @@ CONFIG = {
     "scan_workers"        : 8,            # 80 coin taranırken paralel veri çekmeyi hızlı tut
     "loop_sec"            : 15,
     "dry_run"             : True,         # KAĞIT ÜZERİNDE test — gerçek emir YOK, para riski YOK
+    "dry_run_balance"     : 100.0,        # dry-run tahmini bakiye ($)
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -393,7 +394,7 @@ def connect_exchange() -> ccxt.binance:
 
 def fetch_balance(ex: ccxt.Exchange) -> float:
     if CONFIG["dry_run"]:
-        bal = CONFIG["trade_usdt"] * 20
+        bal = CONFIG.get("dry_run_balance", 100.0)
         log.info(f"[DRY RUN] Tahmini bakiye: {bal:.2f} USDT")
         return bal
     try:
