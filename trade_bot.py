@@ -173,17 +173,16 @@ CONFIG = {
 
     # ── Risk ─────────────────────────────────────────────────
     "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
-    "max_positions"       : 2,
-    # Korelasyon koruması: aynı YÖNDE en fazla kaç pozisyon. 2 → 2 slotun ikisi de
-    # aynı yön olabilir. Veri: slotlar %67 boştu, yön limiti işlemi kısıyordu → 1'den 2'ye.
-    # (Bedeli: 2 aynı-yön pozisyon korelasyon riski; toplam maruziyet yine %40 tavanlı.)
-    "max_per_direction"   : 2,
+    # ⚠️ TEST (dry_run) AYARI: hızlı örneklem için 20 pozisyon. CANLIYA GEÇMEDEN
+    #    ÖNCE max_positions=2, max_per_direction=2, total_exposure_pct=0.40 yap!
+    "max_positions"       : 20,           # TEST: aynı anda 20 işleme kadar
+    "max_per_direction"   : 20,           # TEST: yön limiti yok (örneklem büyüsün)
     # ── Para yönetimi (DİNAMİK) ──────────────────────────────
     # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
     # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
     "dynamic_leverage"    : True,
     "position_pct"        : 0.20,         # her pozisyon marjı = bakiyenin %20'si
-    "total_exposure_pct"  : 0.40,         # tüm açık pozisyonların marjı ≤ bakiyenin %40'ı
+    "total_exposure_pct"  : 5.0,          # TEST: maruziyet tavanı açıldı (canlıda 0.40 yap!)
     "risk_per_trade_pct"  : 2.0,          # hedef risk: SL vurursa ~bakiyenin %2'si
     "min_leverage"        : 5,            # kaldıraç alt sınırı
     "max_leverage"        : 20,           # kaldıraç üst sınırı
