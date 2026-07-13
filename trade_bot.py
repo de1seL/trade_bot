@@ -1975,9 +1975,11 @@ def main():
         log.info(f"  ROI TP     : +%{cfg['roi_tp_pct']*100:.1f} kaldıraçlı kârda anında kapat (aktif)")
     log.info(f"  Mod        : {'🧪 DRY RUN' if cfg['dry_run'] else '💰 CANLI'}")
     log.info("=" * 54)
+    _lev_txt = (f"DİNAMİK {cfg['min_leverage']}-{cfg['max_leverage']}x"
+                if cfg.get("dynamic_leverage") else f"{cfg['leverage']}x")
     notify(
         f"🤖 <b>Bot başladı</b>\n"
-        f"Bakiye: {START_BALANCE:.2f} USDT  Kaldıraç: {cfg['leverage']}x\n"
+        f"Bakiye: {START_BALANCE:.2f} USDT  Kaldıraç: {_lev_txt}\n"
         f"{len(symbols)} coin  Max {cfg['max_positions']} pozisyon\n"
         f"Mod: {'🧪 DRY RUN' if cfg['dry_run'] else '💰 CANLI'}"
     )
