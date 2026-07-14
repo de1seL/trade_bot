@@ -197,7 +197,7 @@ CONFIG = {
     "balance_refresh_sec" : 300,
     "cooldown_sl_sec"     : 3600,
     "cooldown_tp_sec"     : 3600,
-    "max_pos_hours"       : 3,              # 4→3: ölü işlemler kıt 2 slotu erken bıraksın → daha çok işlem (risksiz)
+    "max_pos_hours"       : 24,             # TEST: zaman-limiti çıkışı fiilen kapalı → işlem SL/TP'ye kadar koşsun (zararda erken kesme yok)
     "max_spread_pct"      : 0.0015,
 
     # ── Trailing senkron ─────────────────────────────────────
@@ -225,7 +225,7 @@ CONFIG = {
 
     # ── Zaman + Kâr çıkışı ───────────────────────────────────
     # Pozisyon N saattir açıksa VE kaldıraçlı ROI ≥ %X ise direkt kapat (kârı kilitle).
-    "time_profit_enabled" : True,
+    "time_profit_enabled" : False,        # TEST: 2 saatlik zaman-kâr çıkışı KAPALI (SL/TP'ye bıraksın)
     "time_profit_hours"   : 2.0,          # 2 saattir açıksa
     "time_profit_roi_pct" : 5.0,          # ve ROI ≥ +%5 ise → sat
 
