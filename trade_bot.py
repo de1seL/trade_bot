@@ -176,7 +176,7 @@ CONFIG = {
     # ⚠️ TEST (dry_run) AYARI: hızlı örneklem için 20 pozisyon. CANLIYA GEÇMEDEN
     #    ÖNCE max_positions=2, max_per_direction=2, total_exposure_pct=0.40 yap!
     "max_positions"       : 3,            # CANLI: aynı anda max 3 işlem
-    "max_per_direction"   : 3,            # 3 işlemin hepsi açılabilsin (yön limiti yok)
+    "max_per_direction"   : 2,            # aynı yönde max 2 → 3'ü birden short/long OLAMAZ (korelasyon koruması)
     # ── Para yönetimi (DİNAMİK) ──────────────────────────────
     # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
     # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
