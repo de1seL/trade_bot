@@ -175,14 +175,14 @@ CONFIG = {
     "trade_usdt"          : 10,          # (risk_based_sizing KAPALIYKEN kullanılır)
     # ⚠️ TEST (dry_run) AYARI: hızlı örneklem için 20 pozisyon. CANLIYA GEÇMEDEN
     #    ÖNCE max_positions=2, max_per_direction=2, total_exposure_pct=0.40 yap!
-    "max_positions"       : 10,           # TEST: aynı anda max 10 işlem
-    "max_per_direction"   : 10,           # TEST: yön limiti yok
+    "max_positions"       : 3,            # CANLI: aynı anda max 3 işlem
+    "max_per_direction"   : 3,            # 3 işlemin hepsi açılabilsin (yön limiti yok)
     # ── Para yönetimi (DİNAMİK) ──────────────────────────────
     # dynamic_leverage AÇIK → her pozisyon marjı = bakiyenin %position_pct'i;
     # kaldıraç risk hesabına göre [min,max] aralığında otomatik belirlenir.
     "dynamic_leverage"    : False,        # TEST: sabit boyut/kaldıraç (her işlem $10 marj, 5x)
     "position_pct"        : 0.20,         # her pozisyon marjı = bakiyenin %20'si
-    "total_exposure_pct"  : 5.0,          # TEST: maruziyet tavanı açıldı (canlıda 0.40 yap!)
+    "total_exposure_pct"  : 0.40,         # (sabit boyut modunda etkisiz; dinamiğe dönersen %40 tavan)
     "risk_per_trade_pct"  : 2.0,          # hedef risk: SL vurursa ~bakiyenin %2'si
     "min_leverage"        : 5,            # kaldıraç alt sınırı
     "max_leverage"        : 20,           # kaldıraç üst sınırı
@@ -239,7 +239,7 @@ CONFIG = {
     "parallel_scan"       : True,
     "scan_workers"        : 8,            # 80 coin taranırken paralel veri çekmeyi hızlı tut
     "loop_sec"            : 15,
-    "dry_run"             : True,         # KAĞIT ÜZERİNDE test — gerçek emir YOK, para riski YOK
+    "dry_run"             : False,        # 💰 CANLI — GERÇEK EMİR, GERÇEK PARA
     "dry_run_balance"     : 100.0,        # dry-run tahmini bakiye ($)
 }
 
