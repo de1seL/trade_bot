@@ -83,7 +83,7 @@ CONFIG = {
     "min_listing_days"    : 45,
 
     # ── Kaldıraç ────────────────────────────────────────────
-    "leverage"            : 5,            # sabit 5x (dynamic_leverage kapalı)
+    "leverage"            : 10,           # sabit 10x (dynamic_leverage kapalı)
 
     # ── Zaman dilimleri ─────────────────────────────────────
     "daily_tf"            : "1d",
