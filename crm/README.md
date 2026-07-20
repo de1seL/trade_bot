@@ -1,56 +1,42 @@
 # CRM Taslak — Müşteri Yönetimi
 
-Ortak veritabanlı, giriş ekranlı CRM taslağı. Tüm çalışanlar aynı müşteri
-listesini görür; ekleme, düzenleme ve notlar herkese anında yansır.
-
-## Kurulum ve çalıştırma
-
-```bash
-pip install fastapi uvicorn
-python server.py
-```
-
-Ardından tarayıcıda **http://localhost:8000** adresini açın.
-Aynı ofis ağındaki arkadaşlarınız **http://<sizin-ip-adresiniz>:8000**
-adresiyle bağlanabilir (IP adresinizi Windows'ta `ipconfig`,
-Mac/Linux'ta `ip addr` ile öğrenebilirsiniz).
-
-**Demo kullanıcılar:** `deniz`, `selin`, `emre` — şifre hepsi için `1234`.
-Yeni kullanıcı eklemek için `server.py` içindeki `SEED_USERS` listesine
-ekleyip `crm.db` dosyasını silerek sunucuyu yeniden başlatın.
-
-Veriler bu klasördeki `crm.db` (SQLite) dosyasında saklanır — yedeklemek
-için bu tek dosyayı kopyalamanız yeterlidir.
+Tek dosyalık, kurulum gerektirmeyen bir CRM taslağı. `index.html` dosyasını
+herhangi bir tarayıcıda açmanız yeterlidir (sunucu gerekmez).
 
 ## Özellikler
 
-- **Giriş ekranı**: Her çalışan kendi hesabıyla girer; açılışta liste otomatik
-  olarak kendi müşterilerine filtrelenir (filtreyi silip herkesi görebilir).
-- **Ortak veri**: Müşteriler SQLite veritabanında tutulur; bir kişinin
-  eklediği/düzenlediği kayıt herkeste görünür.
-- **Müşteri düzenleme**: "Düzenle" ile tüm bilgiler (durum dahil) güncellenir.
-- **Görüşme notları**: Her müşterinin altında tarihli, yazarı belli not
-  geçmişi ("Deniz — 2026-07-20 10:02 · Telefonla görüşüldü...").
-- **Sonraki temas tarihi**: Tarihi geçen temaslar listede kırmızı ⚠ ile
-  görünür — kimin aranması gerektiği bir bakışta belli olur.
-- **Sorumlu çalışan filtresi**: "Sorumlu Çalışan" kutusuna isim yazınca
-  (örn. `deniz`) o kişinin müşterileri listelenir.
-- **Durum filtresi**: "Durum" menüsünden ya da üstteki **Aktif** /
-  **Potansiyel** kartlarına tıklayarak (ikinci tıklama filtreyi kaldırır).
-  Çalışan + durum birlikte çalışır: "deniz" + Aktif → Deniz'in aktif müşterileri.
-- **Sıralama**: "Müşteri Adı" veya "Kayıt Tarihi" başlığına tıklayarak
-  artan/azalan (Türkçe alfabeye uygun).
-- **Tarih aralığı filtresi** ve **isim/şirket arama**.
-- **Excel'e aktarma (.xlsx)**: Tabloda o an görünen (tüm filtrelere uyan)
-  kayıtları indirir; dosya adı seçilen tarih aralığını içerir. Çıktıda mavi
-  dolgulu kalın başlıklar, içeriğe göre sütun genişlikleri, Sorumlu ve
-  Sonraki Temas sütunları ile duruma göre önerilen **Aksiyonlar** sütunu
-  bulunur. Harici kütüphane kullanılmaz; dosya tarayıcıda üretilir.
+- **Müşteri listesi**: ad, şirket, e-posta, telefon, sorumlu çalışan, durum
+  (Aktif / Potansiyel / Pasif) ve kayıt tarihi.
+- **Sorumlu çalışan atama ve filtreleme**: Her müşteri bir çalışana atanır.
+  "Sorumlu Çalışan" kutusuna isim yazınca (örn. `deniz`) o kişinin müşterileri
+  listelenir; kutu mevcut isimleri önerir.
+- **Durum filtresi**: Araç çubuğundaki "Durum" menüsünden ya da üstteki
+  **Aktif** / **Potansiyel** kartlarına tıklayarak duruma göre filtreleme
+  (aynı karta ikinci tıklama filtreyi kaldırır). Çalışan + durum filtresi
+  birlikte çalışır: "deniz" + Aktif → Deniz'in aktif müşterileri.
+- **Sıralama**: "Müşteri Adı" veya "Kayıt Tarihi" sütun başlığına tıklayarak artan/azalan sıralama (Türkçe alfabeye uygun).
+- **Tarih aralığı filtresi**: Başlangıç ve bitiş tarihi seçerek listeyi daraltma.
+- **İsim/şirket arama**.
+- **Excel'e aktarma (.xlsx)**: "Excel'e Aktar" düğmesi, tabloda o an görünen
+  (yani seçilen tarih aralığı + arama filtresine uyan) kayıtları gerçek bir
+  `.xlsx` dosyası olarak indirir. Dosya adı seçilen aralığı içerir,
+  örn. `musteriler_2026-03-01_2026-05-31.xlsx`. Çıktıda:
+  - Başlık satırı **mavi dolgulu, kalın beyaz yazılı** ve ortalanmıştır.
+  - Sütun genişlikleri içeriğe göre ayarlıdır (e-posta ve uzun metinler sığar).
+  - **Aksiyonlar** sütunu, müşterinin durumuna göre önerilen sonraki adımı
+    içerir (örn. Potansiyel → "Takip araması yap, teklif gönder"); çalışanlar
+    Excel'de üzerine yazabilir.
+- **Müşteri ekleme/silme**: Veriler tarayıcının `localStorage`'ında saklanır;
+  sayfa yenilense de kaybolmaz.
+
+## Kullanım: belirli tarih aralığını Excel'e aktarma
+
+1. Üstteki **Başlangıç Tarihi** ve **Bitiş Tarihi** alanlarından aralığı seçin.
+2. Tabloda yalnızca o aralıktaki müşteriler görünür.
+3. **⬇ Excel'e Aktar (.xlsx)** düğmesine tıklayın — dosya indirilir ve Excel'de doğrudan açılır.
 
 ## Teknik not
 
-- Sunucu: FastAPI + SQLite (`server.py`, tek dosya). Arayüz: `index.html`
-  (tek dosya, kütüphanesiz).
-- Bu bir taslaktır: şifreler basit SHA-256 ile saklanır, oturumlar sunucu
-  yeniden başlayınca düşer (tekrar giriş yeterli). Gerçek kullanımda HTTPS,
-  güçlü parola politikası ve düzenli yedekleme eklenmelidir.
+Harici hiçbir kütüphane/CDN kullanılmaz; `.xlsx` dosyası tarayıcıda
+JavaScript ile (sıkıştırmasız ZIP + SpreadsheetML) üretilir. Bu bir taslaktır:
+gerçek kullanımda veriler bir veritabanına taşınmalı ve kullanıcı girişi eklenmelidir.

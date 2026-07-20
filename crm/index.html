@@ -35,12 +35,7 @@
   }
   header h1 { font-size: 20px; }
   header h1 span { color: var(--primary); }
-  .header-right { display: flex; align-items: center; gap: 10px; }
-  .user-chip {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
-    padding: 6px 14px; font-size: 14px; font-weight: 600;
-  }
-  .container { max-width: 1150px; margin: 24px auto; padding: 0 16px; }
+  .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
 
   .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
   .stat-card {
@@ -60,26 +55,22 @@
   }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field label { font-size: 12px; color: var(--muted); font-weight: 600; }
-  input, select, textarea {
+  input, select {
     padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
-    font-size: 14px; background: #fff; color: var(--text); font-family: inherit;
+    font-size: 14px; background: #fff; color: var(--text);
   }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
   button {
     padding: 9px 16px; border: none; border-radius: 8px; font-size: 14px;
-    font-weight: 600; cursor: pointer; transition: background .15s; font-family: inherit;
+    font-weight: 600; cursor: pointer; transition: background .15s;
   }
-  button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   .btn-primary { background: var(--primary); color: #fff; }
   .btn-primary:hover { background: var(--primary-dark); }
   .btn-green { background: var(--green); color: #fff; }
   .btn-green:hover { background: #15803d; }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-ghost:hover { background: var(--bg); }
-  .btn-small { padding: 4px 10px; font-size: 13px; }
-  .btn-edit { background: transparent; color: var(--primary); padding: 4px 8px; font-size: 13px; }
-  .btn-edit:hover { background: #dbeafe; }
   .btn-del { background: transparent; color: var(--red); padding: 4px 8px; font-size: 13px; }
   .btn-del:hover { background: #fee2e2; }
 
@@ -103,7 +94,6 @@
   .badge.aktif { background: #dcfce7; color: #166534; }
   .badge.potansiyel { background: #fef9c3; color: #854d0e; }
   .badge.pasif { background: #f1f5f9; color: #475569; }
-  .overdue { color: var(--red); font-weight: 700; }
 
   /* Modal */
   .modal-backdrop {
@@ -112,63 +102,21 @@
   }
   .modal-backdrop.open { display: flex; }
   .modal {
-    background: var(--card); border-radius: 12px; padding: 24px; width: 100%; max-width: 480px;
-    max-height: 90vh; overflow-y: auto;
+    background: var(--card); border-radius: 12px; padding: 24px; width: 100%; max-width: 440px;
   }
   .modal h2 { font-size: 17px; margin-bottom: 16px; }
   .modal .field { margin-bottom: 12px; }
-  .modal .field input, .modal .field select, .modal .field textarea { width: 100%; }
+  .modal .field input, .modal .field select { width: 100%; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-
-  /* Not geçmişi */
-  .notes-section { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; }
-  .notes-section h3 { font-size: 14px; margin-bottom: 10px; }
-  .note-item {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px; margin-bottom: 8px; font-size: 13px;
-  }
-  .note-meta { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
-  .note-add { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
-  .note-add textarea { flex: 1; resize: vertical; min-height: 40px; }
-
-  /* Giriş ekranı */
-  .login-overlay {
-    position: fixed; inset: 0; background: var(--bg); z-index: 20;
-    display: flex; align-items: center; justify-content: center; padding: 16px;
-  }
-  .login-overlay.hidden { display: none; }
-  .login-box {
-    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-    padding: 32px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px;
-  }
-  .login-box h2 { font-size: 20px; text-align: center; }
-  .login-box h2 span { color: var(--primary); }
-  .login-box p { font-size: 13px; color: var(--muted); text-align: center; }
-  .login-error { color: var(--red); font-size: 13px; text-align: center; min-height: 18px; }
 
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
 </style>
 </head>
 <body>
 
-<!-- Giriş ekranı -->
-<div class="login-overlay" id="loginOverlay">
-  <div class="login-box">
-    <h2>📇 <span>CRM</span> Giriş</h2>
-    <p>Demo kullanıcılar: <b>deniz</b>, <b>selin</b>, <b>emre</b> — şifre: <b>1234</b></p>
-    <input type="text" id="loginUser" placeholder="Kullanıcı adı" autocomplete="username">
-    <input type="password" id="loginPass" placeholder="Şifre" autocomplete="current-password"
-           onkeydown="if(event.key==='Enter')doLogin()">
-    <div class="login-error" id="loginError"></div>
-    <button class="btn-primary" onclick="doLogin()">Giriş Yap</button>
-  </div>
-</div>
-
 <header>
   <h1>📇 <span>CRM</span> Müşteri Yönetimi <small style="color:var(--muted);font-weight:400">(taslak)</small></h1>
-  <div class="header-right">
-    <span class="user-chip" id="userChip" style="display:none"></span>
-    <button class="btn-ghost btn-small" id="logoutBtn" style="display:none" onclick="logout()">Çıkış</button>
+  <div style="display:flex;gap:8px">
     <button class="btn-primary" onclick="openModal()">+ Yeni Müşteri</button>
   </div>
 </header>
@@ -225,7 +173,6 @@
             <th>Sorumlu</th>
             <th>Durum</th>
             <th class="sortable" onclick="setSort('date')">Kayıt Tarihi <span class="arrow" id="arrow-date"></span></th>
-            <th>Sonraki Temas</th>
             <th></th>
           </tr>
         </thead>
@@ -238,14 +185,13 @@
   <p class="hint">💡 Sütun başlıklarına tıklayarak <b>isme</b> veya <b>tarihe</b> göre sıralayabilirsiniz.
   "Sorumlu Çalışan" kutusuna isim yazınca (örn. Deniz) o kişinin müşterileri listelenir;
   üstteki <b>Aktif</b> / <b>Potansiyel</b> kartlarına tıklayarak duruma göre filtreleyebilirsiniz.
-  <span class="overdue">Kırmızı</span> sonraki temas tarihi, temasın geciktiğini gösterir.
   Excel'e aktarma, tabloda o an görünen (tüm filtrelere uyan) kayıtları indirir.</p>
 </div>
 
-<!-- Müşteri ekleme / düzenleme modalı -->
+<!-- Yeni müşteri modalı -->
 <div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this) closeModal()">
   <div class="modal">
-    <h2 id="modalTitle">Yeni Müşteri Ekle</h2>
+    <h2>Yeni Müşteri Ekle</h2>
     <div class="field"><label>Müşteri Adı *</label><input type="text" id="fName"></div>
     <div class="field"><label>Şirket</label><input type="text" id="fCompany"></div>
     <div class="field"><label>E-posta</label><input type="email" id="fEmail"></div>
@@ -259,20 +205,9 @@
       </select>
     </div>
     <div class="field"><label>Kayıt Tarihi *</label><input type="date" id="fDate"></div>
-    <div class="field"><label>Sonraki Temas Tarihi</label><input type="date" id="fNextContact"></div>
-
-    <div class="notes-section" id="notesSection" style="display:none">
-      <h3>📝 Görüşme Notları</h3>
-      <div id="notesList"></div>
-      <div class="note-add">
-        <textarea id="noteText" placeholder="Yeni not yazın... (örn. Telefonla görüşüldü, teklif bekliyor)"></textarea>
-        <button class="btn-primary btn-small" onclick="addNote()">Ekle</button>
-      </div>
-    </div>
-
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Vazgeç</button>
-      <button class="btn-primary" onclick="saveCustomer()">Kaydet</button>
+      <button class="btn-primary" onclick="addCustomer()">Kaydet</button>
     </div>
   </div>
 </div>
@@ -280,93 +215,34 @@
 <script>
 "use strict";
 
-/* ---------- Sunucu API katmanı ---------- */
-const TOKEN_KEY = "crm_token";
+/* ---------- Veri (localStorage) ---------- */
+const STORAGE_KEY = "crm_customers_v2";
 
-async function api(path, opts = {}) {
-  let res;
+const SEED = [
+  { id: 1, name: "Ahmet Yılmaz",  company: "Yılmaz İnşaat",    email: "ahmet@yilmazinsaat.com", phone: "0532 111 22 33", assignee: "Deniz",  status: "Aktif",      date: "2026-01-15" },
+  { id: 2, name: "Zeynep Kaya",   company: "Kaya Tekstil",     email: "zeynep@kayatekstil.com", phone: "0533 222 33 44", assignee: "Selin",  status: "Potansiyel", date: "2026-02-03" },
+  { id: 3, name: "Mehmet Demir",  company: "Demir Lojistik",   email: "mehmet@demirloj.com",    phone: "0534 333 44 55", assignee: "Deniz",  status: "Aktif",      date: "2026-03-21" },
+  { id: 4, name: "Elif Şahin",    company: "Şahin Gıda",       email: "elif@sahingida.com",     phone: "0535 444 55 66", assignee: "Emre",   status: "Pasif",      date: "2026-04-10" },
+  { id: 5, name: "Can Öztürk",    company: "Öztürk Yazılım",   email: "can@ozturksoft.com",     phone: "0536 555 66 77", assignee: "Selin",  status: "Potansiyel", date: "2026-05-28" },
+  { id: 6, name: "Ayşe Çelik",    company: "Çelik Mobilya",    email: "ayse@celikmobilya.com",  phone: "0537 666 77 88", assignee: "Deniz",  status: "Aktif",      date: "2026-06-14" },
+  { id: 7, name: "Burak Arslan",  company: "Arslan Otomotiv",  email: "burak@arslanoto.com",    phone: "0538 777 88 99", assignee: "Emre",   status: "Potansiyel", date: "2026-07-02" },
+];
+
+function loadCustomers() {
   try {
-    res = await fetch(path, {
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + (localStorage.getItem(TOKEN_KEY) || ""),
-        ...(opts.headers || {}),
-      },
-    });
-  } catch (e) {
-    throw new Error("Sunucuya ulaşılamadı. server.py çalışıyor mu?");
-  }
-  if (res.status === 401) {
-    showLogin();
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || "Oturum geçersiz.");
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || ("Hata: " + res.status));
-  }
-  if (res.status === 204) return null;
-  return res.json();
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* bozuk veri → seed'e dön */ }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED));
+  return SEED.slice();
+}
+function saveCustomers() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
 }
 
-/* ---------- Durum ---------- */
-let customers = [];
-let currentUser = null;
+let customers = loadCustomers();
 let sortKey = "date";   // "name" | "date"
 let sortDir = -1;       // 1 = artan, -1 = azalan
-let editingId = null;   // null = yeni kayıt, sayı = düzenlenen müşteri id'si
-
-/* ---------- Giriş / çıkış ---------- */
-function showLogin() {
-  document.getElementById("loginOverlay").classList.remove("hidden");
-}
-
-async function doLogin() {
-  const username = document.getElementById("loginUser").value.trim();
-  const password = document.getElementById("loginPass").value;
-  const errEl = document.getElementById("loginError");
-  errEl.textContent = "";
-  try {
-    const r = await api("/api/login", { method: "POST", body: JSON.stringify({ username, password }) });
-    localStorage.setItem(TOKEN_KEY, r.token);
-    currentUser = r.display;
-    // Giriş yapan kişinin kendi müşterileri açılışta filtreli gelsin (silip herkesi görebilir)
-    document.getElementById("assigneeFilter").value = r.display;
-    enterApp();
-  } catch (e) {
-    errEl.textContent = e.message;
-  }
-}
-
-function logout() {
-  localStorage.removeItem(TOKEN_KEY);
-  location.reload();
-}
-
-async function enterApp() {
-  document.getElementById("loginOverlay").classList.add("hidden");
-  const chip = document.getElementById("userChip");
-  chip.textContent = "👤 " + currentUser;
-  chip.style.display = "";
-  document.getElementById("logoutBtn").style.display = "";
-  await loadCustomers();
-}
-
-async function boot() {
-  if (!localStorage.getItem(TOKEN_KEY)) { showLogin(); return; }
-  try {
-    const me = await api("/api/me");
-    currentUser = me.display;
-    await enterApp();
-  } catch (e) { /* 401 zaten giriş ekranını açtı */ }
-}
-
-/* ---------- Veri ---------- */
-async function loadCustomers() {
-  customers = await api("/api/customers");
-  render();
-}
 
 /* ---------- Sıralama & filtreleme ---------- */
 function setSort(key) {
@@ -415,7 +291,6 @@ function setStatusFilter(s) {
 
 /* ---------- Görünüm ---------- */
 function formatDateTR(iso) {
-  if (!iso) return "-";
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
 }
@@ -426,11 +301,8 @@ function escapeHtml(s) {
 function render() {
   const rows = getFiltered();
   const tbody = document.getElementById("tbody");
-  const today = new Date().toISOString().slice(0, 10);
 
-  tbody.innerHTML = rows.map(c => {
-    const overdue = c.next_contact && c.next_contact < today;
-    return `
+  tbody.innerHTML = rows.map(c => `
     <tr>
       <td><b>${escapeHtml(c.name)}</b></td>
       <td>${escapeHtml(c.company || "-")}</td>
@@ -439,13 +311,8 @@ function render() {
       <td>${escapeHtml(c.assignee || "-")}</td>
       <td><span class="badge ${c.status.toLocaleLowerCase("tr")}">${escapeHtml(c.status)}</span></td>
       <td>${formatDateTR(c.date)}</td>
-      <td><span class="${overdue ? "overdue" : ""}" ${overdue ? 'title="Temas tarihi geçti!"' : ""}>${formatDateTR(c.next_contact)}${overdue ? " ⚠" : ""}</span></td>
-      <td>
-        <button class="btn-edit" onclick="openEdit(${c.id})">Düzenle</button>
-        <button class="btn-del" onclick="deleteCustomer(${c.id})">Sil</button>
-      </td>
-    </tr>`;
-  }).join("");
+      <td><button class="btn-del" onclick="deleteCustomer(${c.id})">Sil</button></td>
+    </tr>`).join("");
 
   document.getElementById("emptyMsg").style.display = rows.length ? "none" : "block";
 
@@ -466,47 +333,22 @@ function render() {
   document.getElementById("assigneeList").innerHTML = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join("");
 }
 
-/* ---------- Ekle / Düzenle / Sil ---------- */
+/* ---------- Ekle / Sil ---------- */
 function openModal() {
-  editingId = null;
-  document.getElementById("modalTitle").textContent = "Yeni Müşteri Ekle";
-  ["fName", "fCompany", "fEmail", "fPhone", "fAssignee", "fNextContact"].forEach(id => document.getElementById(id).value = "");
-  document.getElementById("fStatus").value = "Potansiyel";
   document.getElementById("fDate").value = new Date().toISOString().slice(0, 10);
-  document.getElementById("fAssignee").value = currentUser || "";
-  document.getElementById("notesSection").style.display = "none";
   document.getElementById("modalBackdrop").classList.add("open");
   document.getElementById("fName").focus();
 }
-
-async function openEdit(id) {
-  const c = customers.find(x => x.id === id);
-  if (!c) return;
-  editingId = id;
-  document.getElementById("modalTitle").textContent = "Müşteriyi Düzenle";
-  document.getElementById("fName").value = c.name;
-  document.getElementById("fCompany").value = c.company || "";
-  document.getElementById("fEmail").value = c.email || "";
-  document.getElementById("fPhone").value = c.phone || "";
-  document.getElementById("fAssignee").value = c.assignee || "";
-  document.getElementById("fStatus").value = c.status;
-  document.getElementById("fDate").value = c.date;
-  document.getElementById("fNextContact").value = c.next_contact || "";
-  document.getElementById("notesSection").style.display = "";
-  document.getElementById("modalBackdrop").classList.add("open");
-  await loadNotes(id);
-}
-
 function closeModal() {
   document.getElementById("modalBackdrop").classList.remove("open");
-  editingId = null;
+  ["fName", "fCompany", "fEmail", "fPhone", "fAssignee"].forEach(id => document.getElementById(id).value = "");
 }
-
-async function saveCustomer() {
+function addCustomer() {
   const name = document.getElementById("fName").value.trim();
   const date = document.getElementById("fDate").value;
   if (!name || !date) { alert("Müşteri adı ve kayıt tarihi zorunludur."); return; }
-  const payload = {
+  customers.push({
+    id: Date.now(),
     name,
     company: document.getElementById("fCompany").value.trim(),
     email: document.getElementById("fEmail").value.trim(),
@@ -514,56 +356,17 @@ async function saveCustomer() {
     assignee: document.getElementById("fAssignee").value.trim(),
     status: document.getElementById("fStatus").value,
     date,
-    next_contact: document.getElementById("fNextContact").value,
-  };
-  try {
-    if (editingId === null) {
-      await api("/api/customers", { method: "POST", body: JSON.stringify(payload) });
-    } else {
-      await api("/api/customers/" + editingId, { method: "PUT", body: JSON.stringify(payload) });
-    }
-    closeModal();
-    await loadCustomers();
-  } catch (e) { alert(e.message); }
+  });
+  saveCustomers();
+  closeModal();
+  render();
 }
-
-async function deleteCustomer(id) {
+function deleteCustomer(id) {
   const c = customers.find(x => x.id === id);
-  if (!c || !confirm(`"${c.name}" silinsin mi? Notları da silinir.`)) return;
-  try {
-    await api("/api/customers/" + id, { method: "DELETE" });
-    await loadCustomers();
-  } catch (e) { alert(e.message); }
-}
-
-/* ---------- Notlar ---------- */
-async function loadNotes(id) {
-  const list = document.getElementById("notesList");
-  list.innerHTML = '<div class="note-meta">Yükleniyor...</div>';
-  try {
-    const notes = await api(`/api/customers/${id}/notes`);
-    list.innerHTML = notes.length
-      ? notes.map(n => `
-        <div class="note-item">
-          <div class="note-meta">${escapeHtml(n.author)} — ${escapeHtml(n.created_at)}</div>
-          <div>${escapeHtml(n.text)}</div>
-        </div>`).join("")
-      : '<div class="note-meta">Henüz not yok. İlk notu siz ekleyin.</div>';
-  } catch (e) {
-    list.innerHTML = `<div class="note-meta">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function addNote() {
-  if (editingId === null) return;
-  const ta = document.getElementById("noteText");
-  const text = ta.value.trim();
-  if (!text) return;
-  try {
-    await api(`/api/customers/${editingId}/notes`, { method: "POST", body: JSON.stringify({ text }) });
-    ta.value = "";
-    await loadNotes(editingId);
-  } catch (e) { alert(e.message); }
+  if (!c || !confirm(`"${c.name}" silinsin mi?`)) return;
+  customers = customers.filter(x => x.id !== id);
+  saveCustomers();
+  render();
 }
 
 /* ---------- Excel (.xlsx) dışa aktarma ----------
@@ -641,11 +444,10 @@ function exportExcel() {
     "Pasif": "Yeniden kazanım e-postası gönder",
   };
 
-  const header = ["Müşteri Adı", "Şirket", "E-posta", "Telefon", "Sorumlu", "Durum", "Kayıt Tarihi", "Sonraki Temas", "Aksiyonlar"];
-  const colWidths = [24, 24, 34, 18, 16, 14, 16, 16, 44];
+  const header = ["Müşteri Adı", "Şirket", "E-posta", "Telefon", "Sorumlu", "Durum", "Kayıt Tarihi", "Aksiyonlar"];
+  const colWidths = [24, 24, 34, 18, 16, 14, 16, 44];
   const data = [header, ...rows.map(c =>
-    [c.name, c.company, c.email, c.phone, c.assignee, c.status, formatDateTR(c.date),
-     c.next_contact ? formatDateTR(c.next_contact) : "", ACTION_BY_STATUS[c.status] || ""])];
+    [c.name, c.company, c.email, c.phone, c.assignee, c.status, formatDateTR(c.date), ACTION_BY_STATUS[c.status] || ""])];
 
   let sheetRows = "";
   data.forEach((cells, r) => {
@@ -728,7 +530,7 @@ function exportExcel() {
   URL.revokeObjectURL(url);
 }
 
-boot();
+render();
 </script>
 </body>
 </html>
