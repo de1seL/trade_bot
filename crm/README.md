@@ -5,7 +5,15 @@ herhangi bir tarayıcıda açmanız yeterlidir (sunucu gerekmez).
 
 ## Özellikler
 
-- **Müşteri listesi**: ad, şirket, e-posta, telefon, durum (Aktif / Potansiyel / Pasif) ve kayıt tarihi.
+- **Müşteri listesi**: ad, şirket, e-posta, telefon, sorumlu çalışan, durum
+  (Aktif / Potansiyel / Pasif) ve kayıt tarihi.
+- **Sorumlu çalışan atama ve filtreleme**: Her müşteri bir çalışana atanır.
+  "Sorumlu Çalışan" kutusuna isim yazınca (örn. `deniz`) o kişinin müşterileri
+  listelenir; kutu mevcut isimleri önerir.
+- **Durum filtresi**: Araç çubuğundaki "Durum" menüsünden ya da üstteki
+  **Aktif** / **Potansiyel** kartlarına tıklayarak duruma göre filtreleme
+  (aynı karta ikinci tıklama filtreyi kaldırır). Çalışan + durum filtresi
+  birlikte çalışır: "deniz" + Aktif → Deniz'in aktif müşterileri.
 - **Sıralama**: "Müşteri Adı" veya "Kayıt Tarihi" sütun başlığına tıklayarak artan/azalan sıralama (Türkçe alfabeye uygun).
 - **Tarih aralığı filtresi**: Başlangıç ve bitiş tarihi seçerek listeyi daraltma.
 - **İsim/şirket arama**.
