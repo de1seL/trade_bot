@@ -12,7 +12,12 @@ herhangi bir tarayıcıda açmanız yeterlidir (sunucu gerekmez).
 - **Excel'e aktarma (.xlsx)**: "Excel'e Aktar" düğmesi, tabloda o an görünen
   (yani seçilen tarih aralığı + arama filtresine uyan) kayıtları gerçek bir
   `.xlsx` dosyası olarak indirir. Dosya adı seçilen aralığı içerir,
-  örn. `musteriler_2026-03-01_2026-05-31.xlsx`.
+  örn. `musteriler_2026-03-01_2026-05-31.xlsx`. Çıktıda:
+  - Başlık satırı **mavi dolgulu, kalın beyaz yazılı** ve ortalanmıştır.
+  - Sütun genişlikleri içeriğe göre ayarlıdır (e-posta ve uzun metinler sığar).
+  - **Aksiyonlar** sütunu, müşterinin durumuna göre önerilen sonraki adımı
+    içerir (örn. Potansiyel → "Takip araması yap, teklif gönder"); çalışanlar
+    Excel'de üzerine yazabilir.
 - **Müşteri ekleme/silme**: Veriler tarayıcının `localStorage`'ında saklanır;
   sayfa yenilense de kaybolmaz.
 
