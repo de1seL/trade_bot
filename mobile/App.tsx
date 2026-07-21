@@ -30,11 +30,12 @@ import { buildSummary } from './src/utils/portfolio';
 import { buildFuturesSummary } from './src/utils/futures';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { FuturesScreen } from './src/screens/FuturesScreen';
+import { MarketScreen } from './src/screens/MarketScreen';
 import { AddHoldingScreen } from './src/screens/AddHoldingScreen';
 import { AddFuturesScreen } from './src/screens/AddFuturesScreen';
 import { SettingsModal } from './src/screens/SettingsModal';
 
-type Tab = 'portfolio' | 'futures';
+type Tab = 'portfolio' | 'futures' | 'market';
 
 export default function App() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -176,7 +177,7 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <SafeAreaView style={styles.root}>
         <View style={styles.screen}>
-          {tab === 'portfolio' ? (
+          {tab === 'portfolio' && (
             <PortfolioScreen
               summary={summary}
               displayCurrency={settings.displayCurrency}
@@ -188,7 +189,8 @@ export default function App() {
               onDelete={deleteHolding}
               onOpenSettings={() => setShowSettings(true)}
             />
-          ) : (
+          )}
+          {tab === 'futures' && (
             <FuturesScreen
               summary={futuresSummary}
               refreshing={refreshing}
@@ -198,6 +200,7 @@ export default function App() {
               onDelete={deleteFutures}
             />
           )}
+          {tab === 'market' && <MarketScreen />}
         </View>
 
         {/* Alt sekme çubuğu */}
@@ -213,6 +216,12 @@ export default function App() {
             label="Futures"
             active={tab === 'futures'}
             onPress={() => setTab('futures')}
+          />
+          <TabButton
+            icon="📈"
+            label="Piyasa"
+            active={tab === 'market'}
+            onPress={() => setTab('market')}
           />
           <TabButton
             icon="⚙️"
