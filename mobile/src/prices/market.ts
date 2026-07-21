@@ -1,4 +1,4 @@
-import { COINS } from './coins';
+import { COINS, CoinOption } from './coins';
 
 // ─────────────────────────────────────────────────────────────
 // Piyasa verisi (canlı fiyat listeleri)
@@ -170,4 +170,27 @@ export async function fetchGoldMarket(): Promise<MarketQuote[]> {
       throw new Error(`${eB?.message ?? 'Binance?'} · ${eC?.message ?? 'CoinGecko?'}`);
     }
   }
+}
+
+// Aranan coin'ler için canlı fiyat listesi (CoinGecko). Piyasa aramasında
+// kullanılır: kullanıcı arar → eşleşen coin'ler → fiyatları.
+export async function fetchQuotesForCoins(
+  coins: CoinOption[]
+): Promise<MarketQuote[]> {
+  if (coins.length === 0) return [];
+  const data = await cgSimple(coins.map((c) => c.coingeckoId));
+  const out: MarketQuote[] = [];
+  for (const c of coins) {
+    const d = data[c.coingeckoId];
+    if (!d || typeof d.usd !== 'number' || typeof d.try !== 'number') continue;
+    out.push({
+      key: c.coingeckoId,
+      symbol: c.symbol,
+      name: c.name,
+      priceUsd: d.usd,
+      priceTry: d.try,
+      changePct: d.usd_24h_change ?? 0,
+    });
+  }
+  return out;
 }

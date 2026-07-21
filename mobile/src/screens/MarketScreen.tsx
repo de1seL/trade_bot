@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { colors, spacing, radius } from '../theme';
 import { formatTRY, formatUSD, formatPct } from '../utils/format';
@@ -14,7 +15,9 @@ import {
   MarketQuote,
   fetchCryptoMarket,
   fetchGoldMarket,
+  fetchQuotesForCoins,
 } from '../prices/market';
+import { searchCoins } from '../prices/search';
 
 type Category = 'crypto' | 'stock' | 'gold' | 'silver';
 
@@ -31,8 +34,13 @@ export function MarketScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Kripto araması
+  const [query, setQuery] = useState('');
+  const [searchQuotes, setSearchQuotes] = useState<MarketQuote[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+
   const load = useCallback(async (cat: Category) => {
-    // Hisse ve gümüş için henüz canlı kaynak yok.
     if (cat === 'stock' || cat === 'silver') {
       setQuotes([]);
       setError('');
@@ -57,7 +65,41 @@ export function MarketScreen() {
     load(category);
   }, [category, load]);
 
+  // Arama (yalnızca kripto): yaz → CoinGecko'da bul → fiyatlarını getir.
+  useEffect(() => {
+    if (category !== 'crypto') return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchQuotes([]);
+      setSearchError('');
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const coins = await searchCoins(q);
+        const top = coins.slice(0, 12);
+        const data = await fetchQuotesForCoins(top);
+        if (!cancelled) {
+          setSearchQuotes(data);
+          setSearchError(data.length === 0 ? 'Sonuç/fiyat yok' : '');
+        }
+      } catch (e: any) {
+        if (!cancelled) setSearchError(`Arama başarısız — ${e?.message ?? 'ağ'}`);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query, category]);
+
   const comingSoon = category === 'stock' || category === 'silver';
+  const searching = category === 'crypto' && query.trim().length >= 2;
+  const data = searching ? searchQuotes : quotes;
 
   return (
     <View style={styles.container}>
@@ -73,17 +115,30 @@ export function MarketScreen() {
             onPress={() => setCategory(c.key)}
             style={[styles.catChip, category === c.key && styles.catChipActive]}
           >
-            <Text
-              style={[
-                styles.catText,
-                category === c.key && styles.catTextActive,
-              ]}
-            >
+            <Text style={[styles.catText, category === c.key && styles.catTextActive]}>
               {c.label}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Kripto arama kutusu */}
+      {category === 'crypto' && (
+        <View style={styles.searchWrap}>
+          <TextInput
+            style={styles.search}
+            placeholder="Coin ara (pepe, render, sui…)"
+            placeholderTextColor={colors.textDim}
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchLoading && (
+            <ActivityIndicator color={colors.textDim} style={styles.searchSpin} />
+          )}
+        </View>
+      )}
 
       {comingSoon ? (
         <View style={styles.empty}>
@@ -93,14 +148,15 @@ export function MarketScreen() {
           <Text style={styles.emptyText}>
             Bu kategori için canlı fiyat kaynağı henüz bağlanmadı. Kripto ve
             altın şu an canlı; hisse (BIST) ve gümüş bir sonraki adımda
-            eklenecek.
+            eklenecek — arama da o zaman burada çalışacak.
           </Text>
         </View>
       ) : (
         <FlatList
-          data={quotes}
+          data={data}
           keyExtractor={(q) => q.key}
           contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={loading}
@@ -109,10 +165,14 @@ export function MarketScreen() {
             />
           }
           ListHeaderComponent={
-            error ? <Text style={styles.warn}>{error}</Text> : null
+            searching && !!searchError ? (
+              <Text style={styles.warn}>{searchError}</Text>
+            ) : !searching && !!error ? (
+              <Text style={styles.warn}>{error}</Text>
+            ) : null
           }
           ListEmptyComponent={
-            loading ? (
+            (searching ? searchLoading : loading) ? (
               <ActivityIndicator style={{ marginTop: 40 }} color={colors.textDim} />
             ) : null
           }
@@ -139,9 +199,7 @@ function QuoteRow({ item }: { item: MarketQuote }) {
         <Text style={styles.priceUsd}>{formatUSD(item.priceUsd)}</Text>
       </View>
       <View style={styles.changeCol}>
-        <Text style={[styles.change, { color }]}>
-          {formatPct(item.changePct)}
-        </Text>
+        <Text style={[styles.change, { color }]}>{formatPct(item.changePct)}</Text>
       </View>
     </View>
   );
@@ -173,7 +231,23 @@ const styles = StyleSheet.create({
   catChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   catText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   catTextActive: { color: '#fff' },
-  list: { padding: spacing.lg, paddingTop: 0 },
+  searchWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    justifyContent: 'center',
+  },
+  search: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    fontSize: 15,
+  },
+  searchSpin: { position: 'absolute', right: spacing.xl, top: spacing.md },
+  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
   warn: { color: colors.gold, fontSize: 12, marginBottom: spacing.md },
   row: {
     flexDirection: 'row',
