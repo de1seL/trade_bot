@@ -15,7 +15,7 @@ import {
   PricePair,
   Settings,
 } from './src/types';
-import { colors, spacing } from './src/theme';
+import { colors, spacing, radius } from './src/theme';
 import {
   loadHoldings,
   saveHoldings,
@@ -203,14 +203,22 @@ export default function App() {
         {/* Alt sekme çubuğu */}
         <View style={styles.tabBar}>
           <TabButton
+            icon="📊"
             label="Portföy"
             active={tab === 'portfolio'}
             onPress={() => setTab('portfolio')}
           />
           <TabButton
+            icon="⚡"
             label="Futures"
             active={tab === 'futures'}
             onPress={() => setTab('futures')}
+          />
+          <TabButton
+            icon="⚙️"
+            label="Ayarlar"
+            active={false}
+            onPress={() => setShowSettings(true)}
           />
         </View>
       </SafeAreaView>
@@ -247,17 +255,26 @@ export default function App() {
 }
 
 function TabButton({
+  icon,
   label,
   active,
   onPress,
 }: {
+  icon: string;
   label: string;
   active: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity style={styles.tabBtn} onPress={onPress} activeOpacity={0.7}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+      <View style={[styles.tabInner, active && styles.tabInnerActive]}>
+        <Text style={[styles.tabIcon, !active && styles.tabIconInactive]}>
+          {icon}
+        </Text>
+        <Text style={[styles.tabText, active && styles.tabTextActive]}>
+          {label}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -270,8 +287,21 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
-  tabBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.md },
-  tabText: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
+  tabBtn: { flex: 1, alignItems: 'center' },
+  tabInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    gap: 2,
+  },
+  tabInnerActive: { backgroundColor: colors.primary + '1F' },
+  tabIcon: { fontSize: 19 },
+  tabIconInactive: { opacity: 0.45 },
+  tabText: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
   tabTextActive: { color: colors.primary },
 });
