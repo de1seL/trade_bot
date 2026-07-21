@@ -1,4 +1,5 @@
 import { MarketQuote } from './market';
+import { BIST } from './bist';
 
 // ─────────────────────────────────────────────────────────────
 // BIST hisse verisi — Yahoo Finance (resmi olmayan, anahtarsız uç noktalar).
@@ -98,10 +99,37 @@ export async function fetchStockMarket(): Promise<MarketQuote[]> {
   return quotes;
 }
 
-// BIST hisse arama (Yahoo v1 search, sadece .IS hisseleri).
+// BIST hisse arama.
+// Önce yerel liste (sembol veya ada göre, Türkçe uyumlu); yerel sonuç yoksa
+// Yahoo aramasına düşer. Böylece "GA" → GARAN, "garanti" → GARAN çalışır.
 export async function searchStocks(query: string): Promise<StockRef[]> {
   const q = query.trim();
-  if (q.length < 2) return [];
+  if (q.length < 1) return [];
+  const qUpper = q.toLocaleUpperCase('tr-TR');
+  const qLower = q.toLocaleLowerCase('tr-TR');
+
+  const local = BIST.filter(
+    (s) =>
+      s.symbol.startsWith(qUpper) ||
+      s.name.toLocaleLowerCase('tr-TR').includes(qLower)
+  )
+    .slice(0, 15)
+    .map((s) => ({
+      symbol: s.symbol,
+      fullSymbol: `${s.symbol}.IS`,
+      name: s.name,
+    }));
+
+  if (local.length > 0) return local;
+  try {
+    return await yahooSearch(q);
+  } catch {
+    return [];
+  }
+}
+
+// Yahoo v1 search (yedek — yerel listede olmayan semboller için).
+async function yahooSearch(q: string): Promise<StockRef[]> {
   const url = `${YQ}/v1/finance/search?q=${encodeURIComponent(q)}&lang=tr-TR`;
   const res = await fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': UA },
