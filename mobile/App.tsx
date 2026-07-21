@@ -8,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   Currency,
   FuturesPosition,
@@ -206,25 +207,29 @@ export default function App() {
         {/* Alt sekme çubuğu */}
         <View style={styles.tabBar}>
           <TabButton
-            icon="📊"
+            icon="wallet-outline"
+            iconActive="wallet"
             label="Portföy"
             active={tab === 'portfolio'}
             onPress={() => setTab('portfolio')}
           />
           <TabButton
-            icon="⚡"
+            icon="flash-outline"
+            iconActive="flash"
             label="Futures"
             active={tab === 'futures'}
             onPress={() => setTab('futures')}
           />
           <TabButton
-            icon="📈"
+            icon="trending-up-outline"
+            iconActive="trending-up"
             label="Piyasa"
             active={tab === 'market'}
             onPress={() => setTab('market')}
           />
           <TabButton
-            icon="⚙️"
+            icon="settings-outline"
+            iconActive="settings"
             label="Ayarlar"
             active={false}
             onPress={() => setShowSettings(true)}
@@ -263,13 +268,17 @@ export default function App() {
   );
 }
 
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
 function TabButton({
   icon,
+  iconActive,
   label,
   active,
   onPress,
 }: {
-  icon: string;
+  icon: IoniconName;
+  iconActive: IoniconName;
   label: string;
   active: boolean;
   onPress: () => void;
@@ -277,9 +286,11 @@ function TabButton({
   return (
     <TouchableOpacity style={styles.tabBtn} onPress={onPress} activeOpacity={0.7}>
       <View style={[styles.tabInner, active && styles.tabInnerActive]}>
-        <Text style={[styles.tabIcon, !active && styles.tabIconInactive]}>
-          {icon}
-        </Text>
+        <Ionicons
+          name={active ? iconActive : icon}
+          size={22}
+          color={active ? colors.primary : colors.textDim}
+        />
         <Text style={[styles.tabText, active && styles.tabTextActive]}>
           {label}
         </Text>
