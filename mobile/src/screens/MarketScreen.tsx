@@ -201,6 +201,7 @@ export function MarketScreen() {
           renderItem={({ item }) => (
             <QuoteRow
               item={item}
+              primaryUsd={category === 'crypto'}
               onPress={category === 'gold' ? undefined : () => openDetail(item)}
             />
           )}
@@ -219,13 +220,28 @@ export function MarketScreen() {
 
 function QuoteRow({
   item,
+  primaryUsd,
   onPress,
 }: {
   item: MarketQuote;
+  primaryUsd?: boolean;
   onPress?: () => void;
 }) {
   const up = item.changePct >= 0;
   const color = up ? colors.green : colors.red;
+  // Kripto → USD ana; hisse/altın → TL ana.
+  const primary =
+    primaryUsd && item.priceUsd > 0
+      ? formatUSD(item.priceUsd)
+      : formatTRY(item.priceTry);
+  const secondary =
+    primaryUsd && item.priceUsd > 0
+      ? item.priceTry > 0
+        ? formatTRY(item.priceTry)
+        : null
+      : item.priceUsd > 0
+      ? formatUSD(item.priceUsd)
+      : null;
   const inner = (
     <>
       <View style={{ flex: 1 }}>
@@ -235,10 +251,8 @@ function QuoteRow({
         </Text>
       </View>
       <View style={styles.rightCol}>
-        <Text style={styles.priceTry}>{formatTRY(item.priceTry)}</Text>
-        {item.priceUsd > 0 && (
-          <Text style={styles.priceUsd}>{formatUSD(item.priceUsd)}</Text>
-        )}
+        <Text style={styles.priceTry}>{primary}</Text>
+        {secondary && <Text style={styles.priceUsd}>{secondary}</Text>}
       </View>
       <View style={styles.changeCol}>
         <Text style={[styles.change, { color }]}>{formatPct(item.changePct)}</Text>

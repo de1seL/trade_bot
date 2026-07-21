@@ -170,7 +170,20 @@ export async function fetchStockHistory(
   days: number
 ): Promise<number[]> {
   const fullSymbol = symbol.endsWith('.IS') ? symbol : `${symbol}.IS`;
-  const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : '1y';
+  const range =
+    days <= 7
+      ? '5d'
+      : days <= 30
+      ? '1mo'
+      : days <= 90
+      ? '3mo'
+      : days <= 180
+      ? '6mo'
+      : days <= 365
+      ? '1y'
+      : days <= 730
+      ? '2y'
+      : '5y';
   const interval = days <= 7 ? '60m' : '1d';
   const url = `${YQ}/v8/finance/chart/${encodeURIComponent(
     fullSymbol
