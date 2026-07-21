@@ -19,6 +19,7 @@ import {
 } from '../prices/market';
 import { searchCoins } from '../prices/search';
 import { fetchStockMarket, searchStocks, fetchStockQuotes } from '../prices/stocks';
+import { AssetDetailModal } from '../components/AssetDetailModal';
 
 type Category = 'crypto' | 'stock' | 'gold' | 'silver';
 
@@ -40,6 +41,15 @@ export function MarketScreen() {
   const [searchQuotes, setSearchQuotes] = useState<MarketQuote[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
+
+  // Detay/grafik modalı
+  const [selected, setSelected] = useState<MarketQuote | null>(null);
+  const [selectedKind, setSelectedKind] = useState<'crypto' | 'stock'>('crypto');
+
+  const openDetail = (q: MarketQuote) => {
+    setSelectedKind(category === 'stock' ? 'stock' : 'crypto');
+    setSelected(q);
+  };
 
   const load = useCallback(async (cat: Category) => {
     if (cat === 'silver') {
@@ -188,18 +198,36 @@ export function MarketScreen() {
               <ActivityIndicator style={{ marginTop: 40 }} color={colors.textDim} />
             ) : null
           }
-          renderItem={({ item }) => <QuoteRow item={item} />}
+          renderItem={({ item }) => (
+            <QuoteRow
+              item={item}
+              onPress={category === 'gold' ? undefined : () => openDetail(item)}
+            />
+          )}
         />
       )}
+
+      <AssetDetailModal
+        visible={!!selected}
+        kind={selectedKind}
+        quote={selected}
+        onClose={() => setSelected(null)}
+      />
     </View>
   );
 }
 
-function QuoteRow({ item }: { item: MarketQuote }) {
+function QuoteRow({
+  item,
+  onPress,
+}: {
+  item: MarketQuote;
+  onPress?: () => void;
+}) {
   const up = item.changePct >= 0;
   const color = up ? colors.green : colors.red;
-  return (
-    <View style={styles.row}>
+  const inner = (
+    <>
       <View style={{ flex: 1 }}>
         <Text style={styles.symbol}>{item.symbol}</Text>
         <Text style={styles.name} numberOfLines={1}>
@@ -215,7 +243,15 @@ function QuoteRow({ item }: { item: MarketQuote }) {
       <View style={styles.changeCol}>
         <Text style={[styles.change, { color }]}>{formatPct(item.changePct)}</Text>
       </View>
-    </View>
+      {onPress && <Text style={styles.chevron}>›</Text>}
+    </>
+  );
+  return onPress ? (
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
+      {inner}
+    </TouchableOpacity>
+  ) : (
+    <View style={styles.row}>{inner}</View>
   );
 }
 
@@ -280,6 +316,7 @@ const styles = StyleSheet.create({
   priceUsd: { color: colors.textDim, fontSize: 11, marginTop: 2 },
   changeCol: { minWidth: 72, alignItems: 'flex-end' },
   change: { fontSize: 13, fontWeight: '700' },
+  chevron: { color: colors.textDim, fontSize: 20, marginLeft: spacing.sm },
   empty: { alignItems: 'center', paddingTop: spacing.xl * 2, paddingHorizontal: spacing.xl },
   emptyTitle: {
     color: colors.text,

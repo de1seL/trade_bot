@@ -163,3 +163,31 @@ async function yahooSearch(q: string): Promise<StockRef[]> {
 export async function fetchStockQuotes(refs: StockRef[]): Promise<MarketQuote[]> {
   return quotesFor(refs);
 }
+
+// Hisse geçmiş fiyatı (grafik) — Yahoo v8 chart, TL kapanışlar.
+export async function fetchStockHistory(
+  symbol: string,
+  days: number
+): Promise<number[]> {
+  const fullSymbol = symbol.endsWith('.IS') ? symbol : `${symbol}.IS`;
+  const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : '1y';
+  const interval = days <= 7 ? '60m' : '1d';
+  const url = `${YQ}/v8/finance/chart/${encodeURIComponent(
+    fullSymbol
+  )}?range=${range}&interval=${interval}`;
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': UA },
+  });
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
+  const json = (await res.json()) as {
+    chart?: {
+      result?: {
+        indicators?: { quote?: { close?: (number | null)[] }[] };
+      }[];
+    };
+  };
+  const closes = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+  const out = closes.filter((x): x is number => typeof x === 'number');
+  if (out.length < 2) throw new Error('Yahoo geçmiş yok');
+  return out;
+}
