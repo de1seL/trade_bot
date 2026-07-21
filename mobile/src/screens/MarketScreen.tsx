@@ -18,6 +18,7 @@ import {
   fetchQuotesForCoins,
 } from '../prices/market';
 import { searchCoins } from '../prices/search';
+import { fetchStockMarket, searchStocks, fetchStockQuotes } from '../prices/stocks';
 
 type Category = 'crypto' | 'stock' | 'gold' | 'silver';
 
@@ -41,7 +42,7 @@ export function MarketScreen() {
   const [searchError, setSearchError] = useState('');
 
   const load = useCallback(async (cat: Category) => {
-    if (cat === 'stock' || cat === 'silver') {
+    if (cat === 'silver') {
       setQuotes([]);
       setError('');
       return;
@@ -50,7 +51,11 @@ export function MarketScreen() {
     setError('');
     try {
       const data =
-        cat === 'crypto' ? await fetchCryptoMarket() : await fetchGoldMarket();
+        cat === 'crypto'
+          ? await fetchCryptoMarket()
+          : cat === 'gold'
+          ? await fetchGoldMarket()
+          : await fetchStockMarket();
       setQuotes(data);
       if (data.length === 0) setError('Veri gelmedi, tekrar dene');
     } catch (e: any) {
@@ -65,9 +70,9 @@ export function MarketScreen() {
     load(category);
   }, [category, load]);
 
-  // Arama (yalnızca kripto): yaz → CoinGecko'da bul → fiyatlarını getir.
+  // Arama (kripto & hisse): yaz → ilgili kaynakta bul → fiyatlarını getir.
   useEffect(() => {
-    if (category !== 'crypto') return;
+    if (category !== 'crypto' && category !== 'stock') return;
     const q = query.trim();
     if (q.length < 2) {
       setSearchQuotes([]);
@@ -78,9 +83,14 @@ export function MarketScreen() {
     setSearchLoading(true);
     const t = setTimeout(async () => {
       try {
-        const coins = await searchCoins(q);
-        const top = coins.slice(0, 12);
-        const data = await fetchQuotesForCoins(top);
+        let data: MarketQuote[];
+        if (category === 'crypto') {
+          const coins = await searchCoins(q);
+          data = await fetchQuotesForCoins(coins.slice(0, 12));
+        } else {
+          const stocks = await searchStocks(q);
+          data = await fetchStockQuotes(stocks.slice(0, 12));
+        }
         if (!cancelled) {
           setSearchQuotes(data);
           setSearchError(data.length === 0 ? 'Sonuç/fiyat yok' : '');
@@ -97,8 +107,9 @@ export function MarketScreen() {
     };
   }, [query, category]);
 
-  const comingSoon = category === 'stock' || category === 'silver';
-  const searching = category === 'crypto' && query.trim().length >= 2;
+  const canSearch = category === 'crypto' || category === 'stock';
+  const comingSoon = category === 'silver';
+  const searching = canSearch && query.trim().length >= 2;
   const data = searching ? searchQuotes : quotes;
 
   return (
@@ -122,16 +133,20 @@ export function MarketScreen() {
         ))}
       </View>
 
-      {/* Kripto arama kutusu */}
-      {category === 'crypto' && (
+      {/* Arama kutusu (kripto & hisse) */}
+      {canSearch && (
         <View style={styles.searchWrap}>
           <TextInput
             style={styles.search}
-            placeholder="Coin ara (pepe, render, sui…)"
+            placeholder={
+              category === 'crypto'
+                ? 'Coin ara (pepe, render, sui…)'
+                : 'Hisse ara (THYAO, ASELS, garanti…)'
+            }
             placeholderTextColor={colors.textDim}
             value={query}
             onChangeText={setQuery}
-            autoCapitalize="none"
+            autoCapitalize={category === 'stock' ? 'characters' : 'none'}
             autoCorrect={false}
           />
           {searchLoading && (
@@ -142,13 +157,10 @@ export function MarketScreen() {
 
       {comingSoon ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>
-            {category === 'stock' ? 'Hisse' : 'Gümüş'} verisi yakında
-          </Text>
+          <Text style={styles.emptyTitle}>Gümüş verisi yakında</Text>
           <Text style={styles.emptyText}>
-            Bu kategori için canlı fiyat kaynağı henüz bağlanmadı. Kripto ve
-            altın şu an canlı; hisse (BIST) ve gümüş bir sonraki adımda
-            eklenecek — arama da o zaman burada çalışacak.
+            Gümüş için canlı fiyat kaynağı henüz bağlanmadı. Kripto, altın ve
+            hisse (BIST) şu an canlı; gümüş bir sonraki adımda eklenecek.
           </Text>
         </View>
       ) : (
@@ -196,7 +208,9 @@ function QuoteRow({ item }: { item: MarketQuote }) {
       </View>
       <View style={styles.rightCol}>
         <Text style={styles.priceTry}>{formatTRY(item.priceTry)}</Text>
-        <Text style={styles.priceUsd}>{formatUSD(item.priceUsd)}</Text>
+        {item.priceUsd > 0 && (
+          <Text style={styles.priceUsd}>{formatUSD(item.priceUsd)}</Text>
+        )}
       </View>
       <View style={styles.changeCol}>
         <Text style={[styles.change, { color }]}>{formatPct(item.changePct)}</Text>

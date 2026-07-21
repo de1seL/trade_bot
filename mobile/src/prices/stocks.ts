@@ -1,0 +1,137 @@
+import { MarketQuote } from './market';
+
+// ─────────────────────────────────────────────────────────────
+// BIST hisse verisi — Yahoo Finance (resmi olmayan, anahtarsız uç noktalar).
+// Semboller ".IS" ile biter (örn. THYAO.IS). Fiyatlar TL cinsinden.
+//
+// Not: Yahoo resmi bir API değil; bazı ağlarda engellenebilir/limitlenebilir.
+// ─────────────────────────────────────────────────────────────
+
+const YQ = 'https://query1.finance.yahoo.com';
+const UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
+
+export interface StockRef {
+  symbol: string; // görünen sembol (THYAO)
+  fullSymbol: string; // Yahoo sembolü (THYAO.IS)
+  name: string;
+}
+
+const POPULAR_BIST: { symbol: string; name: string }[] = [
+  { symbol: 'THYAO', name: 'Türk Hava Yolları' },
+  { symbol: 'ASELS', name: 'Aselsan' },
+  { symbol: 'GARAN', name: 'Garanti BBVA' },
+  { symbol: 'AKBNK', name: 'Akbank' },
+  { symbol: 'EREGL', name: 'Ereğli Demir Çelik' },
+  { symbol: 'KCHOL', name: 'Koç Holding' },
+  { symbol: 'SISE', name: 'Şişecam' },
+  { symbol: 'TUPRS', name: 'Tüpraş' },
+  { symbol: 'BIMAS', name: 'BİM' },
+  { symbol: 'SASA', name: 'Sasa Polyester' },
+];
+
+// Tek bir hissenin fiyatı + günlük değişimi (Yahoo v8 chart).
+async function fetchChart(
+  fullSymbol: string
+): Promise<{ price: number; change: number }> {
+  const url = `${YQ}/v8/finance/chart/${encodeURIComponent(
+    fullSymbol
+  )}?interval=1d&range=1d`;
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': UA },
+  });
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
+  const json = (await res.json()) as {
+    chart?: {
+      result?: {
+        meta?: {
+          regularMarketPrice?: number;
+          previousClose?: number;
+          chartPreviousClose?: number;
+        };
+      }[];
+    };
+  };
+  const meta = json.chart?.result?.[0]?.meta;
+  const price = meta?.regularMarketPrice;
+  const prev = meta?.previousClose ?? meta?.chartPreviousClose;
+  if (typeof price !== 'number') throw new Error('Yahoo fiyat yok');
+  const change = prev && prev > 0 ? ((price - prev) / prev) * 100 : 0;
+  return { price, change };
+}
+
+function toQuote(
+  ref: { symbol: string; name: string },
+  price: number,
+  change: number
+): MarketQuote {
+  return {
+    key: ref.symbol,
+    symbol: ref.symbol,
+    name: ref.name,
+    priceTry: price,
+    priceUsd: 0, // hisse: USD gösterilmez
+    changePct: change,
+  };
+}
+
+async function quotesFor(
+  refs: { symbol: string; name: string; fullSymbol: string }[]
+): Promise<MarketQuote[]> {
+  const settled = await Promise.allSettled(
+    refs.map((r) => fetchChart(r.fullSymbol))
+  );
+  const out: MarketQuote[] = [];
+  settled.forEach((s, i) => {
+    if (s.status === 'fulfilled') {
+      out.push(toQuote(refs[i], s.value.price, s.value.change));
+    }
+  });
+  return out;
+}
+
+// Popüler BIST hisseleri (arama boşken).
+export async function fetchStockMarket(): Promise<MarketQuote[]> {
+  const refs = POPULAR_BIST.map((s) => ({ ...s, fullSymbol: `${s.symbol}.IS` }));
+  const quotes = await quotesFor(refs);
+  if (quotes.length === 0) throw new Error('Yahoo verisi alınamadı');
+  return quotes;
+}
+
+// BIST hisse arama (Yahoo v1 search, sadece .IS hisseleri).
+export async function searchStocks(query: string): Promise<StockRef[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const url = `${YQ}/v1/finance/search?q=${encodeURIComponent(q)}&lang=tr-TR`;
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': UA },
+  });
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
+  const json = (await res.json()) as {
+    quotes?: {
+      symbol?: string;
+      shortname?: string;
+      longname?: string;
+      quoteType?: string;
+    }[];
+  };
+  const quotes = json.quotes ?? [];
+  return quotes
+    .filter(
+      (x) =>
+        x.symbol &&
+        x.symbol.endsWith('.IS') &&
+        (x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
+    )
+    .slice(0, 15)
+    .map((x) => ({
+      symbol: (x.symbol as string).replace('.IS', ''),
+      fullSymbol: x.symbol as string,
+      name: x.shortname || x.longname || (x.symbol as string),
+    }));
+}
+
+// Aranan hisselerin fiyatları.
+export async function fetchStockQuotes(refs: StockRef[]): Promise<MarketQuote[]> {
+  return quotesFor(refs);
+}
