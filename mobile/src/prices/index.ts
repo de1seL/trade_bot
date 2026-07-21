@@ -1,15 +1,17 @@
 import { Holding } from '../types';
+import { fetchBinanceTRYPrices } from './binance';
 
 // ─────────────────────────────────────────────────────────────
 // Fiyat servisi
 //
-// Bugün: kripto fiyatları CoinGecko'dan canlı (TL cinsinden, ücretsiz,
-// anahtar gerektirmez). Diğer varlıklar (hisse/altın/döviz/fon) kullanıcının
-// girdiği manuel güncel fiyatla değerlenir.
+// Kripto fiyatları iki kaynaktan, sırayla denenerek çekilir:
+//   1) CoinGecko — doğrudan TL (try) verir, tüm coin'leri kapsar.
+//   2) Binance — CoinGecko rate-limit (429) verirse yedek. USDT paritesi ×
+//      USDT/TRY ile TL fiyat hesaplar. Anahtar gerektirmez, limiti yüksektir.
 //
-// İleride: buraya bir "provider" daha eklenince (örn. altın/USDTRY için bir
-// ücretsiz API) o türler de otomatik canlıya döner. Ekranların değişmesi
-// gerekmez — sadece bu dosya priceMap'e o türleri doldurur.
+// Diğer varlıklar (hisse/altın/döviz/fon) kullanıcının girdiği manuel güncel
+// fiyatla değerlenir. İleride buraya bir sağlayıcı daha eklenince o türler de
+// otomatik canlıya döner; ekranların değişmesi gerekmez.
 // ─────────────────────────────────────────────────────────────
 
 const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price';
@@ -19,17 +21,21 @@ export interface PriceResult {
   priceMap: Record<string, number>;
   // canlı fiyat çekilebildi mi (ağ sorunlarını kullanıcıya bildirmek için)
   ok: boolean;
+  // hangi kaynaktan geldi (bilgi amaçlı)
+  source?: 'coingecko' | 'binance';
   error?: string;
 }
 
-async function fetchCryptoPrices(
+async function fetchCoinGeckoTRY(
   ids: string[]
 ): Promise<Record<string, number>> {
   if (ids.length === 0) return {};
   const url = `${COINGECKO_URL}?ids=${encodeURIComponent(
     ids.join(',')
   )}&vs_currencies=try`;
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+  });
   if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
   const data = (await res.json()) as Record<string, { try?: number }>;
   const out: Record<string, number> = {};
@@ -40,10 +46,26 @@ async function fetchCryptoPrices(
   return out;
 }
 
+// id bazlı fiyatları holding.id bazına yay.
+function applyToHoldings(
+  cryptoHoldings: Holding[],
+  idPrices: Record<string, number>,
+  priceMap: Record<string, number>
+): number {
+  let applied = 0;
+  for (const h of cryptoHoldings) {
+    const p = idPrices[h.coingeckoId as string];
+    if (typeof p === 'number') {
+      priceMap[h.id] = p;
+      applied++;
+    }
+  }
+  return applied;
+}
+
 export async function fetchPrices(holdings: Holding[]): Promise<PriceResult> {
   const priceMap: Record<string, number> = {};
 
-  // Kripto pozisyonlarının benzersiz CoinGecko id'lerini topla.
   const cryptoHoldings = holdings.filter(
     (h) => h.type === 'crypto' && h.coingeckoId
   );
@@ -51,17 +73,27 @@ export async function fetchPrices(holdings: Holding[]): Promise<PriceResult> {
     new Set(cryptoHoldings.map((h) => h.coingeckoId as string))
   );
 
+  if (ids.length === 0) return { priceMap, ok: true };
+
+  // 1) Önce CoinGecko (doğrudan TL).
   try {
-    const cryptoPrices = await fetchCryptoPrices(ids);
-    // id bazlı fiyatları holding.id bazına yay.
-    for (const h of cryptoHoldings) {
-      const p = cryptoPrices[h.coingeckoId as string];
-      if (typeof p === 'number') priceMap[h.id] = p;
+    const cg = await fetchCoinGeckoTRY(ids);
+    if (applyToHoldings(cryptoHoldings, cg, priceMap) > 0) {
+      return { priceMap, ok: true, source: 'coingecko' };
     }
-    return { priceMap, ok: true };
+  } catch {
+    // 429 veya ağ hatası — Binance'e düş.
+  }
+
+  // 2) Yedek: Binance (USDT × USDT/TRY).
+  try {
+    const bn = await fetchBinanceTRYPrices(ids);
+    if (applyToHoldings(cryptoHoldings, bn, priceMap) > 0) {
+      return { priceMap, ok: true, source: 'binance' };
+    }
   } catch (e: any) {
-    // Ağ hatası: kripto fiyatları güncellenemedi. Diğer varlıklar zaten
-    // manuel fiyatla çalışmaya devam eder.
     return { priceMap, ok: false, error: e?.message ?? 'Ağ hatası' };
   }
+
+  return { priceMap, ok: false, error: 'Fiyat alınamadı' };
 }
