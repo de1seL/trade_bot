@@ -1,33 +1,34 @@
-import { Holding, PricePair } from '../types';
-import { fetchBinance } from './binance';
+import { PricePair } from '../types';
+import { CoinRef, fetchBinance } from './binance';
 
 // ─────────────────────────────────────────────────────────────
-// Fiyat servisi
+// Fiyat servisi (coin bazlı)
 //
-// Kripto fiyatları hem TL hem USD olarak, iki kaynaktan sırayla denenir:
-//   1) CoinGecko — try + usd birlikte.
-//   2) Binance — CoinGecko 429 verirse yedek (USDT paritesi + USDT/TRY).
-// Ayrıca güncel USD/TRY kuru döndürülür (TL/USD çevirileri için).
+// Verilen coin'ler (coingeckoId + symbol) için hem TL hem USD fiyat ve güncel
+// USD/TRY kuru döndürür. İki kaynak sırayla denenir:
+//   1) CoinGecko — try + usd birlikte, id ile.
+//   2) Binance — 429 durumunda yedek, sembol ile (USDT paritesi).
+//
+// Sonuç coingeckoId bazında döner; hem spot portföy hem futures aynı sonucu
+// kullanır (tek ağ çağrısı).
 // ─────────────────────────────────────────────────────────────
+
+export type { CoinRef };
 
 const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price';
 
-export interface PriceResult {
-  priceMap: Record<string, PricePair>; // holding.id -> {try, usd}
-  usdTry: number | null; // güncel USD/TRY kuru
+export interface MarketResult {
+  pairs: Record<string, PricePair>; // coingeckoId -> {try, usd}
+  usdTry: number | null;
   ok: boolean;
   source?: 'coingecko' | 'binance';
   error?: string;
 }
 
-interface CoinGeckoData {
-  pairs: Record<string, PricePair>; // coingeckoId -> {try, usd}
-  usdTry: number | null;
-}
-
-async function fetchCoinGecko(ids: string[]): Promise<CoinGeckoData> {
-  // 'tether' her zaman eklenir → USD/TRY kurunu ondan okuruz.
-  const reqIds = Array.from(new Set([...ids, 'tether']));
+async function fetchCoinGecko(
+  ids: string[]
+): Promise<{ pairs: Record<string, PricePair>; usdTry: number | null }> {
+  const reqIds = Array.from(new Set([...ids, 'tether'])); // tether → USD/TRY
   const url = `${COINGECKO_URL}?ids=${encodeURIComponent(
     reqIds.join(',')
   )}&vs_currencies=try,usd`;
@@ -47,58 +48,35 @@ async function fetchCoinGecko(ids: string[]): Promise<CoinGeckoData> {
     }
   }
   const tether = data['tether'];
-  const usdTry =
-    tether && typeof tether.try === 'number' ? tether.try : null;
+  const usdTry = tether && typeof tether.try === 'number' ? tether.try : null;
   return { pairs, usdTry };
 }
 
-// coingeckoId bazlı çiftleri holding.id bazına yay.
-function applyToHoldings(
-  cryptoHoldings: Holding[],
-  idPairs: Record<string, PricePair>,
-  priceMap: Record<string, PricePair>
-): number {
-  let applied = 0;
-  for (const h of cryptoHoldings) {
-    const pair = idPairs[h.coingeckoId as string];
-    if (pair) {
-      priceMap[h.id] = pair;
-      applied++;
-    }
-  }
-  return applied;
-}
+export async function fetchMarket(coins: CoinRef[]): Promise<MarketResult> {
+  const ids = Array.from(new Set(coins.map((c) => c.coingeckoId)));
 
-export async function fetchPrices(holdings: Holding[]): Promise<PriceResult> {
-  const priceMap: Record<string, PricePair> = {};
-
-  const cryptoHoldings = holdings.filter(
-    (h) => h.type === 'crypto' && h.coingeckoId
-  );
-  const ids = Array.from(
-    new Set(cryptoHoldings.map((h) => h.coingeckoId as string))
-  );
-
-  // 1) Önce CoinGecko.
+  // 1) CoinGecko
   try {
     const cg = await fetchCoinGecko(ids);
-    applyToHoldings(cryptoHoldings, cg.pairs, priceMap);
-    // Kur alındıysa (kriptosuz portföyde bile) başarı say.
-    if (cg.usdTry !== null) {
-      return { priceMap, usdTry: cg.usdTry, ok: true, source: 'coingecko' };
+    if (cg.usdTry !== null || Object.keys(cg.pairs).length > 0) {
+      return {
+        pairs: cg.pairs,
+        usdTry: cg.usdTry,
+        ok: true,
+        source: 'coingecko',
+      };
     }
   } catch {
-    // 429 / ağ — Binance'e düş.
+    // 429 / ağ → Binance
   }
 
-  // 2) Yedek: Binance.
+  // 2) Binance yedek
   try {
-    const bn = await fetchBinance(ids);
-    applyToHoldings(cryptoHoldings, bn.pairs, priceMap);
-    return { priceMap, usdTry: bn.usdTry, ok: true, source: 'binance' };
+    const bn = await fetchBinance(coins);
+    return { pairs: bn.pairs, usdTry: bn.usdTry, ok: true, source: 'binance' };
   } catch (e: any) {
     return {
-      priceMap,
+      pairs: {},
       usdTry: null,
       ok: false,
       error: e?.message ?? 'Ağ hatası',

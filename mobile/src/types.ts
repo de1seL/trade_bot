@@ -75,3 +75,39 @@ export interface PortfolioSummary {
   totalRealPnlPctTRY: number;
   items: HoldingValue[];
 }
+
+// ─────────────────────────────────────────────────────────────
+// Futures (USDT-M vadeli / perpetual) pozisyonları
+// ─────────────────────────────────────────────────────────────
+
+export type FuturesSide = 'long' | 'short';
+
+export interface FuturesPosition {
+  id: string;
+  symbol: string; // BTC (fiyat için USDT paritesi kullanılır → BTCUSDT.P)
+  name: string;
+  coingeckoId: string; // canlı fiyat için
+  side: FuturesSide;
+  entryPrice: number; // USDT — giriş fiyatı
+  leverage: number; // kaldıraç (x)
+  margin: number; // USDT — ayrılan teminat
+  openDate: string;
+}
+
+export interface FuturesValue {
+  position: FuturesPosition;
+  markPrice: number; // USDT güncel fiyat
+  notional: number; // pozisyon büyüklüğü (margin × kaldıraç)
+  quantity: number; // coin adedi (notional / giriş)
+  pnl: number; // USDT kâr/zarar
+  roiPct: number; // teminata göre getiri % (kaldıraçlı)
+  liqPrice: number; // tahmini likidasyon fiyatı
+  priceIsLive: boolean;
+}
+
+export interface FuturesSummary {
+  totalMargin: number; // toplam teminat (USDT)
+  totalPnl: number; // toplam K/Z (USDT)
+  totalRoiPct: number; // teminata göre toplam %
+  items: FuturesValue[];
+}

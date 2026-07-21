@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { AssetType, BuyCurrency, Holding } from '../types';
 import { colors, spacing, radius, assetMeta } from '../theme';
-import { COINS } from '../prices/coins';
+import { COINS, CoinOption } from '../prices/coins';
+import { CoinSearch } from '../components/CoinSearch';
 
 const TYPES: AssetType[] = ['crypto', 'stock', 'gold', 'fx', 'fund', 'cash'];
 const CURRENCIES: { value: BuyCurrency; label: string }[] = [
@@ -46,7 +47,7 @@ export function AddHoldingScreen({
   onClose: () => void;
 }) {
   const [type, setType] = useState<AssetType>('crypto');
-  const [coingeckoId, setCoingeckoId] = useState(COINS[0].coingeckoId);
+  const [selectedCoin, setSelectedCoin] = useState<CoinOption | null>(COINS[0]);
   const [symbol, setSymbol] = useState('');
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -67,14 +68,13 @@ export function AddHoldingScreen({
     let cgId: string | undefined;
 
     if (isCrypto) {
-      const coin = COINS.find((c) => c.coingeckoId === coingeckoId);
-      if (!coin) {
+      if (!selectedCoin) {
         setError('Coin seç');
         return;
       }
-      sym = coin.symbol;
-      nm = coin.name;
-      cgId = coin.coingeckoId;
+      sym = selectedCoin.symbol;
+      nm = selectedCoin.name;
+      cgId = selectedCoin.coingeckoId;
     } else if (!sym) {
       setError('Sembol gir (örn. THYAO, GRAM ALTIN)');
       return;
@@ -140,27 +140,7 @@ export function AddHoldingScreen({
         {isCrypto ? (
           <>
             <Text style={styles.fieldLabel}>Coin</Text>
-            <View style={styles.chips}>
-              {COINS.map((c) => (
-                <TouchableOpacity
-                  key={c.coingeckoId}
-                  onPress={() => setCoingeckoId(c.coingeckoId)}
-                  style={[
-                    styles.chip,
-                    coingeckoId === c.coingeckoId && styles.chipActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      coingeckoId === c.coingeckoId && styles.chipTextActive,
-                    ]}
-                  >
-                    {c.symbol}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <CoinSearch selected={selectedCoin} onSelect={setSelectedCoin} />
           </>
         ) : (
           <>

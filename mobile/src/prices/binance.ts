@@ -1,19 +1,18 @@
-import { COINS } from './coins';
 import { PricePair } from '../types';
 
 // ─────────────────────────────────────────────────────────────
 // Binance yedek fiyat kaynağı
 //
 // CoinGecko 429 (rate limit) verdiğinde devreye girer. Anahtar gerektirmez.
-// USD fiyatı doğrudan coin'in USDT paritesinden; TL fiyatı ise
-// USD × USDT/TRY kuru ile hesaplanır.
+// USD fiyatı coin'in USDT paritesinden; TL fiyatı USD × USDT/TRY ile hesaplanır.
+// Coin'ler sembolleriyle (BTC, ETH, PEPE...) verilir, sabit listeye bağlı değil.
 // ─────────────────────────────────────────────────────────────
 
 const BASE = 'https://api.binance.com/api/v3/ticker/price';
 
-function baseSymbolFor(coingeckoId: string): string | null {
-  const coin = COINS.find((c) => c.coingeckoId === coingeckoId);
-  return coin ? coin.symbol : null;
+export interface CoinRef {
+  coingeckoId: string;
+  symbol: string; // Binance temel sembolü (örn. BTC)
 }
 
 export interface BinanceResult {
@@ -21,17 +20,12 @@ export interface BinanceResult {
   usdTry: number;
 }
 
-export async function fetchBinance(
-  coingeckoIds: string[]
-): Promise<BinanceResult> {
-  const bases = coingeckoIds
-    .map((id) => ({ id, base: baseSymbolFor(id) }))
-    .filter((x): x is { id: string; base: string } => !!x.base);
-
+export async function fetchBinance(coins: CoinRef[]): Promise<BinanceResult> {
   const symbols = new Set<string>(['USDTTRY']);
-  for (const b of bases) {
-    if (b.base === 'USDT') continue; // USDT'nin USD fiyatı 1, TL fiyatı USDTTRY
-    symbols.add(`${b.base}USDT`);
+  for (const c of coins) {
+    const base = c.symbol.toUpperCase();
+    if (base === 'USDT') continue; // USDT: usd=1, try=USDTTRY
+    symbols.add(`${base}USDT`);
   }
 
   const url = `${BASE}?symbols=${encodeURIComponent(
@@ -51,12 +45,13 @@ export async function fetchBinance(
   if (!usdTry) throw new Error('USDTTRY kuru alınamadı');
 
   const pairs: Record<string, PricePair> = {};
-  for (const b of bases) {
-    if (b.base === 'USDT') {
-      pairs[b.id] = { usd: 1, try: usdTry };
+  for (const c of coins) {
+    const base = c.symbol.toUpperCase();
+    if (base === 'USDT') {
+      pairs[c.coingeckoId] = { usd: 1, try: usdTry };
     } else {
-      const usd = priceBySymbol[`${b.base}USDT`];
-      if (usd) pairs[b.id] = { usd, try: usd * usdTry };
+      const usd = priceBySymbol[`${base}USDT`];
+      if (usd) pairs[c.coingeckoId] = { usd, try: usd * usdTry };
     }
   }
   return { pairs, usdTry };
