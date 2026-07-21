@@ -7,24 +7,28 @@ import {
   RefreshControl,
   TouchableOpacity,
 } from 'react-native';
-import { PortfolioSummary } from '../types';
-import { colors, spacing } from '../theme';
+import { Currency, PortfolioSummary } from '../types';
+import { colors, spacing, radius } from '../theme';
 import { SummaryCard } from '../components/SummaryCard';
 import { AllocationBar } from '../components/AllocationBar';
 import { HoldingCard } from '../components/HoldingCard';
 
 export function PortfolioScreen({
   summary,
+  displayCurrency,
   refreshing,
   priceError,
+  onSetCurrency,
   onRefresh,
   onAdd,
   onDelete,
   onOpenSettings,
 }: {
   summary: PortfolioSummary;
+  displayCurrency: Currency;
   refreshing: boolean;
   priceError?: string;
+  onSetCurrency: (c: Currency) => void;
   onRefresh: () => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
@@ -36,9 +40,32 @@ export function PortfolioScreen({
     <View style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.appTitle}>Portföyüm</Text>
-        <TouchableOpacity onPress={onOpenSettings} hitSlop={8}>
-          <Text style={styles.settings}>⚙︎</Text>
-        </TouchableOpacity>
+        <View style={styles.topRight}>
+          <View style={styles.toggle}>
+            {(['TRY', 'USD'] as Currency[]).map((c) => (
+              <TouchableOpacity
+                key={c}
+                onPress={() => onSetCurrency(c)}
+                style={[
+                  styles.toggleBtn,
+                  displayCurrency === c && styles.toggleBtnActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.toggleText,
+                    displayCurrency === c && styles.toggleTextActive,
+                  ]}
+                >
+                  {c === 'TRY' ? 'TL' : 'USD'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity onPress={onOpenSettings} hitSlop={8}>
+            <Text style={styles.settings}>⚙︎</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -103,6 +130,23 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   appTitle: { color: colors.text, fontSize: 22, fontWeight: '700' },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  toggle: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 2,
+  },
+  toggleBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    borderRadius: radius.sm - 2,
+  },
+  toggleBtnActive: { backgroundColor: colors.primary },
+  toggleText: { color: colors.textDim, fontSize: 13, fontWeight: '700' },
+  toggleTextActive: { color: '#fff' },
   settings: { color: colors.textDim, fontSize: 22 },
   list: { padding: spacing.lg, paddingTop: 0, paddingBottom: 120 },
   headerBlock: { marginBottom: spacing.md },

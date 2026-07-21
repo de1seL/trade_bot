@@ -1,6 +1,14 @@
-import { Holding, HoldingValue, PortfolioSummary, Settings } from '../types';
+import {
+  Currency,
+  Holding,
+  HoldingValue,
+  PortfolioSummary,
+  PricePair,
+  Settings,
+  isUsdLike,
+} from '../types';
 
-// Bir pozisyonun alış tarihinden bugüne geçen yıl sayısı.
+// Alış tarihinden bugüne geçen yıl sayısı.
 function yearsSince(iso: string): number {
   const then = new Date(iso).getTime();
   const now = Date.now();
@@ -8,80 +16,139 @@ function yearsSince(iso: string): number {
   return (now - then) / (365.25 * 24 * 60 * 60 * 1000);
 }
 
-// Tek bir pozisyonu güncel fiyatla değerle.
-// priceMap: holding.id -> güncel birim fiyat (TL). Yoksa manuel/alış fiyatına düşer.
-export function valueHolding(
-  holding: Holding,
-  priceMap: Record<string, number>,
-  settings: Settings
-): HoldingValue {
-  const live = priceMap[holding.id];
-  const priceIsLive = typeof live === 'number' && isFinite(live) && live > 0;
-  const currentPrice = priceIsLive
-    ? live
-    : holding.manualPrice && holding.manualPrice > 0
-    ? holding.manualPrice
-    : holding.buyPrice;
+// Bir pozisyonun TOPLAM alış maliyetini hedef para biriminde döndürür.
+// Çapraz çeviri, alış anındaki kur (buyUsdTry) ile yapılır; yoksa güncel kura
+// düşer. Alış kuru saklandığı için TL ve USD bazında farklı yüzdeler çıkar.
+function costInCurrency(
+  h: Holding,
+  target: Currency,
+  currentUsdTry: number | null
+): number {
+  const rate = h.buyUsdTry ?? currentUsdTry ?? 0;
+  const buyIsUsd = isUsdLike(h.buyCurrency);
 
-  const cost = holding.quantity * holding.buyPrice;
-  const value = holding.quantity * currentPrice;
+  let unitTRY: number;
+  let unitUSD: number;
+  if (buyIsUsd) {
+    unitUSD = h.buyPrice;
+    unitTRY = rate > 0 ? h.buyPrice * rate : h.buyPrice;
+  } else {
+    unitTRY = h.buyPrice;
+    unitUSD = rate > 0 ? h.buyPrice / rate : h.buyPrice;
+  }
+  const unit = target === 'TRY' ? unitTRY : unitUSD;
+  return unit * h.quantity;
+}
+
+// Bir pozisyonun güncel BİRİM fiyatını hedef para biriminde döndürür.
+function currentUnitPrice(
+  h: Holding,
+  priceMap: Record<string, PricePair>,
+  currentUsdTry: number | null,
+  target: Currency
+): { price: number; isLive: boolean } {
+  const pair = priceMap[h.id];
+  if (h.type === 'crypto' && pair) {
+    return { price: target === 'TRY' ? pair.try : pair.usd, isLive: true };
+  }
+
+  // Kripto dışı: manuel fiyat (buyCurrency cinsinden), güncel kurla çevrilir.
+  const manual =
+    h.manualPrice && h.manualPrice > 0 ? h.manualPrice : h.buyPrice;
+  const manualIsUsd = isUsdLike(h.buyCurrency);
+  const rate = currentUsdTry ?? h.buyUsdTry ?? 0;
+
+  let priceTRY: number;
+  let priceUSD: number;
+  if (manualIsUsd) {
+    priceUSD = manual;
+    priceTRY = rate > 0 ? manual * rate : manual;
+  } else {
+    priceTRY = manual;
+    priceUSD = rate > 0 ? manual / rate : manual;
+  }
+  return {
+    price: target === 'TRY' ? priceTRY : priceUSD,
+    isLive: false,
+  };
+}
+
+// Tek pozisyonu seçilen para biriminde değerle.
+export function valueHolding(
+  h: Holding,
+  priceMap: Record<string, PricePair>,
+  currentUsdTry: number | null,
+  display: Currency
+): HoldingValue {
+  const cost = costInCurrency(h, display, currentUsdTry);
+  const { price, isLive } = currentUnitPrice(
+    h,
+    priceMap,
+    currentUsdTry,
+    display
+  );
+  const value = price * h.quantity;
   const pnl = value - cost;
   const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
 
-  // Reel getiri: maliyeti enflasyonla bugüne taşı, güncel değerle karşılaştır.
-  // "Paran sadece enflasyon kadar artsaydı ne olurdu?" sorusunun cevabı.
-  const years = yearsSince(holding.buyDate);
-  const inflFactor = Math.pow(1 + settings.annualInflation / 100, years);
-  const inflationAdjustedCost = cost * inflFactor;
-  const realPnl = value - inflationAdjustedCost;
-  const realPnlPct =
-    inflationAdjustedCost > 0 ? (realPnl / inflationAdjustedCost) * 100 : 0;
-
   return {
-    holding,
-    currentPrice,
+    holding: h,
+    currency: display,
+    currentPrice: price,
     cost,
     value,
     pnl,
     pnlPct,
-    realPnl,
-    realPnlPct,
-    priceIsLive,
+    priceIsLive: isLive,
   };
 }
 
-// Tüm portföyü özetle.
 export function buildSummary(
   holdings: Holding[],
-  priceMap: Record<string, number>,
-  settings: Settings
+  priceMap: Record<string, PricePair>,
+  currentUsdTry: number | null,
+  settings: Settings,
+  display: Currency
 ): PortfolioSummary {
-  const items = holdings.map((h) => valueHolding(h, priceMap, settings));
+  const items = holdings.map((h) =>
+    valueHolding(h, priceMap, currentUsdTry, display)
+  );
 
   const totalValue = items.reduce((s, i) => s + i.value, 0);
   const totalCost = items.reduce((s, i) => s + i.cost, 0);
   const totalPnl = totalValue - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
-  // Reel toplam: her pozisyonun enflasyona göre düzeltilmiş maliyeti = value - realPnl.
-  // Bunları toplayıp güncel değerle karşılaştırınca enflasyon-üstü getiri çıkar.
-  const totalAdjustedCost = items.reduce((s, i) => s + (i.value - i.realPnl), 0);
-  const totalRealPnl = totalValue - totalAdjustedCost;
-  const totalRealPnlPct =
-    totalAdjustedCost > 0 ? (totalRealPnl / totalAdjustedCost) * 100 : 0;
+  // Reel K/Z her zaman TL bazında: TL maliyeti enflasyonla bugüne taşı,
+  // TL değerle karşılaştır.
+  let realValueTRY = 0;
+  let adjustedCostTRY = 0;
+  for (const h of holdings) {
+    const costTRY = costInCurrency(h, 'TRY', currentUsdTry);
+    const { price } = currentUnitPrice(h, priceMap, currentUsdTry, 'TRY');
+    const valueTRY = price * h.quantity;
+    const years = yearsSince(h.buyDate);
+    const inflFactor = Math.pow(1 + settings.annualInflation / 100, years);
+    realValueTRY += valueTRY;
+    adjustedCostTRY += costTRY * inflFactor;
+  }
+  const totalRealPnlTRY = realValueTRY - adjustedCostTRY;
+  const totalRealPnlPctTRY =
+    adjustedCostTRY > 0 ? (totalRealPnlTRY / adjustedCostTRY) * 100 : 0;
 
   return {
+    currency: display,
     totalValue,
     totalCost,
     totalPnl,
     totalPnlPct,
-    totalRealPnl,
-    totalRealPnlPct,
+    totalRealPnlTRY,
+    totalRealPnlPctTRY,
     items,
   };
 }
 
-// Varlık türüne göre dağılım (yüzde) — dağılım çubuğu için.
+// Varlık türüne göre dağılım (yüzde). Oranlar para biriminden bağımsızdır.
 export function allocationByType(
   items: HoldingValue[]
 ): { type: string; value: number; pct: number }[] {

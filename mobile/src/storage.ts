@@ -7,6 +7,8 @@ const SETTINGS_KEY = '@portfolio/settings';
 export const DEFAULT_SETTINGS: Settings = {
   // Türkiye için başlangıç değeri — kullanıcı Ayarlar'dan günceller.
   annualInflation: 45,
+  // Varsayılan görüntü para birimi.
+  displayCurrency: 'TRY',
 };
 
 export async function loadHoldings(): Promise<Holding[]> {
@@ -14,7 +16,12 @@ export async function loadHoldings(): Promise<Holding[]> {
     const raw = await AsyncStorage.getItem(HOLDINGS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Geriye dönük uyum: eski kayıtlarda buyCurrency yoksa TL varsay.
+    return parsed.map((h: Holding) => ({
+      ...h,
+      buyCurrency: h.buyCurrency ?? 'TRY',
+    }));
   } catch {
     return [];
   }

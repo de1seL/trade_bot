@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { HoldingValue } from '../types';
 import { colors, spacing, radius, assetMeta } from '../theme';
-import { formatTRY, formatPct, formatQty } from '../utils/format';
+import { formatMoney, formatPct, formatQty } from '../utils/format';
 
 export function HoldingCard({
   item,
@@ -28,12 +28,15 @@ export function HoldingCard({
           {item.priceIsLive && <View style={styles.liveDot} />}
         </View>
         <Text style={styles.sub}>
-          {formatQty(holding.quantity)} × {formatTRY(item.currentPrice)}
+          {formatQty(holding.quantity)} × {formatMoney(item.currentPrice, item.currency)}
+        </Text>
+        <Text style={styles.buyInfo}>
+          Alış: {holding.buyCurrency} · {formatQty(holding.buyPrice)}
         </Text>
       </View>
 
       <View style={styles.right}>
-        <Text style={styles.value}>{formatTRY(item.value)}</Text>
+        <Text style={styles.value}>{formatMoney(item.value, item.currency)}</Text>
         <Text style={[styles.pnl, { color: pnlColor }]}>
           {formatPct(item.pnlPct)}
         </Text>
@@ -73,6 +76,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   sub: { color: colors.textDim, fontSize: 12, marginTop: 4 },
+  buyInfo: { color: colors.textDim, fontSize: 11, marginTop: 2, opacity: 0.8 },
   right: { alignItems: 'flex-end' },
   value: { color: colors.text, fontSize: 15, fontWeight: '600' },
   pnl: { fontSize: 13, marginTop: 2 },

@@ -1,62 +1,68 @@
-import { Holding } from '../types';
-import { fetchBinanceTRYPrices } from './binance';
+import { Holding, PricePair } from '../types';
+import { fetchBinance } from './binance';
 
 // ─────────────────────────────────────────────────────────────
 // Fiyat servisi
 //
-// Kripto fiyatları iki kaynaktan, sırayla denenerek çekilir:
-//   1) CoinGecko — doğrudan TL (try) verir, tüm coin'leri kapsar.
-//   2) Binance — CoinGecko rate-limit (429) verirse yedek. USDT paritesi ×
-//      USDT/TRY ile TL fiyat hesaplar. Anahtar gerektirmez, limiti yüksektir.
-//
-// Diğer varlıklar (hisse/altın/döviz/fon) kullanıcının girdiği manuel güncel
-// fiyatla değerlenir. İleride buraya bir sağlayıcı daha eklenince o türler de
-// otomatik canlıya döner; ekranların değişmesi gerekmez.
+// Kripto fiyatları hem TL hem USD olarak, iki kaynaktan sırayla denenir:
+//   1) CoinGecko — try + usd birlikte.
+//   2) Binance — CoinGecko 429 verirse yedek (USDT paritesi + USDT/TRY).
+// Ayrıca güncel USD/TRY kuru döndürülür (TL/USD çevirileri için).
 // ─────────────────────────────────────────────────────────────
 
 const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price';
 
 export interface PriceResult {
-  // holding.id -> güncel birim fiyat (TL)
-  priceMap: Record<string, number>;
-  // canlı fiyat çekilebildi mi (ağ sorunlarını kullanıcıya bildirmek için)
+  priceMap: Record<string, PricePair>; // holding.id -> {try, usd}
+  usdTry: number | null; // güncel USD/TRY kuru
   ok: boolean;
-  // hangi kaynaktan geldi (bilgi amaçlı)
   source?: 'coingecko' | 'binance';
   error?: string;
 }
 
-async function fetchCoinGeckoTRY(
-  ids: string[]
-): Promise<Record<string, number>> {
-  if (ids.length === 0) return {};
-  const url = `${COINGECKO_URL}?ids=${encodeURIComponent(
-    ids.join(',')
-  )}&vs_currencies=try`;
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-  });
-  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-  const data = (await res.json()) as Record<string, { try?: number }>;
-  const out: Record<string, number> = {};
-  for (const id of ids) {
-    const p = data[id]?.try;
-    if (typeof p === 'number') out[id] = p;
-  }
-  return out;
+interface CoinGeckoData {
+  pairs: Record<string, PricePair>; // coingeckoId -> {try, usd}
+  usdTry: number | null;
 }
 
-// id bazlı fiyatları holding.id bazına yay.
+async function fetchCoinGecko(ids: string[]): Promise<CoinGeckoData> {
+  // 'tether' her zaman eklenir → USD/TRY kurunu ondan okuruz.
+  const reqIds = Array.from(new Set([...ids, 'tether']));
+  const url = `${COINGECKO_URL}?ids=${encodeURIComponent(
+    reqIds.join(',')
+  )}&vs_currencies=try,usd`;
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+  const data = (await res.json()) as Record<
+    string,
+    { try?: number; usd?: number }
+  >;
+
+  const pairs: Record<string, PricePair> = {};
+  for (const id of ids) {
+    const t = data[id]?.try;
+    const u = data[id]?.usd;
+    if (typeof t === 'number' && typeof u === 'number') {
+      pairs[id] = { try: t, usd: u };
+    }
+  }
+  const tether = data['tether'];
+  const usdTry =
+    tether && typeof tether.try === 'number' ? tether.try : null;
+  return { pairs, usdTry };
+}
+
+// coingeckoId bazlı çiftleri holding.id bazına yay.
 function applyToHoldings(
   cryptoHoldings: Holding[],
-  idPrices: Record<string, number>,
-  priceMap: Record<string, number>
+  idPairs: Record<string, PricePair>,
+  priceMap: Record<string, PricePair>
 ): number {
   let applied = 0;
   for (const h of cryptoHoldings) {
-    const p = idPrices[h.coingeckoId as string];
-    if (typeof p === 'number') {
-      priceMap[h.id] = p;
+    const pair = idPairs[h.coingeckoId as string];
+    if (pair) {
+      priceMap[h.id] = pair;
       applied++;
     }
   }
@@ -64,7 +70,7 @@ function applyToHoldings(
 }
 
 export async function fetchPrices(holdings: Holding[]): Promise<PriceResult> {
-  const priceMap: Record<string, number> = {};
+  const priceMap: Record<string, PricePair> = {};
 
   const cryptoHoldings = holdings.filter(
     (h) => h.type === 'crypto' && h.coingeckoId
@@ -73,27 +79,29 @@ export async function fetchPrices(holdings: Holding[]): Promise<PriceResult> {
     new Set(cryptoHoldings.map((h) => h.coingeckoId as string))
   );
 
-  if (ids.length === 0) return { priceMap, ok: true };
-
-  // 1) Önce CoinGecko (doğrudan TL).
+  // 1) Önce CoinGecko.
   try {
-    const cg = await fetchCoinGeckoTRY(ids);
-    if (applyToHoldings(cryptoHoldings, cg, priceMap) > 0) {
-      return { priceMap, ok: true, source: 'coingecko' };
+    const cg = await fetchCoinGecko(ids);
+    applyToHoldings(cryptoHoldings, cg.pairs, priceMap);
+    // Kur alındıysa (kriptosuz portföyde bile) başarı say.
+    if (cg.usdTry !== null) {
+      return { priceMap, usdTry: cg.usdTry, ok: true, source: 'coingecko' };
     }
   } catch {
-    // 429 veya ağ hatası — Binance'e düş.
+    // 429 / ağ — Binance'e düş.
   }
 
-  // 2) Yedek: Binance (USDT × USDT/TRY).
+  // 2) Yedek: Binance.
   try {
-    const bn = await fetchBinanceTRYPrices(ids);
-    if (applyToHoldings(cryptoHoldings, bn, priceMap) > 0) {
-      return { priceMap, ok: true, source: 'binance' };
-    }
+    const bn = await fetchBinance(ids);
+    applyToHoldings(cryptoHoldings, bn.pairs, priceMap);
+    return { priceMap, usdTry: bn.usdTry, ok: true, source: 'binance' };
   } catch (e: any) {
-    return { priceMap, ok: false, error: e?.message ?? 'Ağ hatası' };
+    return {
+      priceMap,
+      usdTry: null,
+      ok: false,
+      error: e?.message ?? 'Ağ hatası',
+    };
   }
-
-  return { priceMap, ok: false, error: 'Fiyat alınamadı' };
 }

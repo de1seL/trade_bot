@@ -13,6 +13,22 @@ export function formatTRY(value: number): string {
   );
 }
 
+export function formatUSD(value: number): string {
+  if (!isFinite(value)) return '$0';
+  return (
+    '$' +
+    value.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
+}
+
+// Seçilen para birimine göre biçimle.
+export function formatMoney(value: number, currency: 'TRY' | 'USD'): string {
+  return currency === 'USD' ? formatUSD(value) : formatTRY(value);
+}
+
 // Büyük değerleri kısalt (₺1,25 Mn gibi) — özet kartı için.
 export function formatTRYShort(value: number): string {
   const abs = Math.abs(value);

@@ -1,36 +1,36 @@
 import { COINS } from './coins';
+import { PricePair } from '../types';
 
 // ─────────────────────────────────────────────────────────────
 // Binance yedek fiyat kaynağı
 //
-// CoinGecko 429 (rate limit) verdiğinde devreye girer. Binance'in halka açık
-// fiyat API'si anahtar gerektirmez ve limiti çok yüksektir. TL fiyatı,
-// coin'in USDT paritesi × USDT/TRY kuru ile hesaplanır.
+// CoinGecko 429 (rate limit) verdiğinde devreye girer. Anahtar gerektirmez.
+// USD fiyatı doğrudan coin'in USDT paritesinden; TL fiyatı ise
+// USD × USDT/TRY kuru ile hesaplanır.
 // ─────────────────────────────────────────────────────────────
 
 const BASE = 'https://api.binance.com/api/v3/ticker/price';
 
-// coingeckoId -> Binance temel sembolü (örn. "bitcoin" -> "BTC")
 function baseSymbolFor(coingeckoId: string): string | null {
   const coin = COINS.find((c) => c.coingeckoId === coingeckoId);
   return coin ? coin.symbol : null;
 }
 
-// İstenen coingeckoId'ler için TL fiyat haritası döndürür.
-export async function fetchBinanceTRYPrices(
-  coingeckoIds: string[]
-): Promise<Record<string, number>> {
-  const out: Record<string, number> = {};
-  if (coingeckoIds.length === 0) return out;
+export interface BinanceResult {
+  pairs: Record<string, PricePair>; // coingeckoId -> {try, usd}
+  usdTry: number;
+}
 
+export async function fetchBinance(
+  coingeckoIds: string[]
+): Promise<BinanceResult> {
   const bases = coingeckoIds
     .map((id) => ({ id, base: baseSymbolFor(id) }))
     .filter((x): x is { id: string; base: string } => !!x.base);
 
-  // Çekilecek Binance sembolleri: her coin'in USDT paritesi + USDT/TRY kuru.
   const symbols = new Set<string>(['USDTTRY']);
   for (const b of bases) {
-    if (b.base === 'USDT') continue; // USDT'nin TL fiyatı doğrudan USDTTRY
+    if (b.base === 'USDT') continue; // USDT'nin USD fiyatı 1, TL fiyatı USDTTRY
     symbols.add(`${b.base}USDT`);
   }
 
@@ -47,16 +47,17 @@ export async function fetchBinanceTRYPrices(
     if (isFinite(p)) priceBySymbol[row.symbol] = p;
   }
 
-  const usdttry = priceBySymbol['USDTTRY'];
-  if (!usdttry) throw new Error('USDTTRY kuru alınamadı');
+  const usdTry = priceBySymbol['USDTTRY'];
+  if (!usdTry) throw new Error('USDTTRY kuru alınamadı');
 
+  const pairs: Record<string, PricePair> = {};
   for (const b of bases) {
     if (b.base === 'USDT') {
-      out[b.id] = usdttry;
+      pairs[b.id] = { usd: 1, try: usdTry };
     } else {
       const usd = priceBySymbol[`${b.base}USDT`];
-      if (usd) out[b.id] = usd * usdttry; // USDT fiyatını TL'ye çevir
+      if (usd) pairs[b.id] = { usd, try: usd * usdTry };
     }
   }
-  return out;
+  return { pairs, usdTry };
 }

@@ -9,26 +9,39 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { AssetType, Holding } from '../types';
+import { AssetType, BuyCurrency, Holding } from '../types';
 import { colors, spacing, radius, assetMeta } from '../theme';
 import { COINS } from '../prices/coins';
 
 const TYPES: AssetType[] = ['crypto', 'stock', 'gold', 'fx', 'fund', 'cash'];
+const CURRENCIES: { value: BuyCurrency; label: string }[] = [
+  { value: 'TRY', label: 'TL' },
+  { value: 'USD', label: 'USD' },
+  { value: 'USDT', label: 'USDT' },
+  { value: 'USDC', label: 'USDC' },
+];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Basit sayı ayrıştırma: hem "1,5" hem "1.5" kabul et.
 function parseNum(s: string): number {
   const n = parseFloat(s.replace(',', '.'));
   return isNaN(n) ? 0 : n;
 }
 
+function curSymbol(c: BuyCurrency): string {
+  if (c === 'TRY') return '₺';
+  if (c === 'USD') return '$';
+  return c; // USDT / USDC
+}
+
 export function AddHoldingScreen({
+  currentUsdTry,
   onAdd,
   onClose,
 }: {
+  currentUsdTry: number | null;
   onAdd: (h: Holding) => void;
   onClose: () => void;
 }) {
@@ -38,6 +51,7 @@ export function AddHoldingScreen({
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [buyPrice, setBuyPrice] = useState('');
+  const [buyCurrency, setBuyCurrency] = useState<BuyCurrency>('TRY');
   const [manualPrice, setManualPrice] = useState('');
   const [buyDate, setBuyDate] = useState(todayISO());
   const [error, setError] = useState('');
@@ -62,7 +76,7 @@ export function AddHoldingScreen({
       nm = coin.name;
       cgId = coin.coingeckoId;
     } else if (!sym) {
-      setError('Sembol gir (örn. THYAO, GRAM ALTIN, USD)');
+      setError('Sembol gir (örn. THYAO, GRAM ALTIN)');
       return;
     }
 
@@ -82,6 +96,9 @@ export function AddHoldingScreen({
       name: nm || sym,
       quantity: qty,
       buyPrice: bp,
+      buyCurrency,
+      // Alış anındaki USD/TRY kuru saklanır (TL↔USD çevirisi için).
+      buyUsdTry: currentUsdTry ?? undefined,
       buyDate,
       manualPrice: isCrypto ? undefined : parseNum(manualPrice) || bp,
       coingeckoId: cgId,
@@ -150,7 +167,7 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>Sembol</Text>
             <TextInput
               style={styles.input}
-              placeholder="THYAO, GRAM ALTIN, USD…"
+              placeholder="THYAO, GRAM ALTIN, EUR…"
               placeholderTextColor={colors.textDim}
               value={symbol}
               onChangeText={setSymbol}
@@ -167,6 +184,26 @@ export function AddHoldingScreen({
           </>
         )}
 
+        <Text style={styles.fieldLabel}>Hangi parayla aldın?</Text>
+        <View style={styles.chips}>
+          {CURRENCIES.map((c) => (
+            <TouchableOpacity
+              key={c.value}
+              onPress={() => setBuyCurrency(c.value)}
+              style={[styles.chip, buyCurrency === c.value && styles.chipActive]}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  buyCurrency === c.value && styles.chipTextActive,
+                ]}
+              >
+                {c.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <Text style={styles.fieldLabel}>Adet / Miktar</Text>
         <TextInput
           style={styles.input}
@@ -177,7 +214,9 @@ export function AddHoldingScreen({
           keyboardType="decimal-pad"
         />
 
-        <Text style={styles.fieldLabel}>Birim Alış Fiyatı (₺)</Text>
+        <Text style={styles.fieldLabel}>
+          Birim Alış Fiyatı ({curSymbol(buyCurrency)})
+        </Text>
         <TextInput
           style={styles.input}
           placeholder="0"
@@ -189,7 +228,9 @@ export function AddHoldingScreen({
 
         {!isCrypto && (
           <>
-            <Text style={styles.fieldLabel}>Güncel Birim Fiyat (₺)</Text>
+            <Text style={styles.fieldLabel}>
+              Güncel Birim Fiyat ({curSymbol(buyCurrency)})
+            </Text>
             <TextInput
               style={styles.input}
               placeholder="Boş bırakılırsa alış fiyatı kullanılır"

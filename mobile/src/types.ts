@@ -2,21 +2,37 @@
 // Temel veri modelleri
 // ─────────────────────────────────────────────────────────────
 
-// Desteklenen varlık türleri. Kripto fiyatları canlı (CoinGecko),
+// Desteklenen varlık türleri. Kripto fiyatları canlı (CoinGecko/Binance),
 // diğerleri şimdilik manuel güncel fiyatla çalışır.
 export type AssetType = 'crypto' | 'stock' | 'gold' | 'fx' | 'fund' | 'cash';
+
+// Portföyün gösterileceği para birimi (üstteki TL/USD geçişi).
+export type Currency = 'TRY' | 'USD';
+
+// Kullanıcının yatırım yaparken kullandığı para birimi.
+// Stablecoin'ler (USDT/USDC) dolar kabul edilir.
+export type BuyCurrency = 'TRY' | 'USD' | 'USDT' | 'USDC';
+
+// Bir BuyCurrency dolar cinsinden mi? (TRY hariç hepsi dolar)
+export function isUsdLike(c: BuyCurrency): boolean {
+  return c !== 'TRY';
+}
 
 // Kullanıcının portföyündeki tek bir pozisyon.
 export interface Holding {
   id: string;
   type: AssetType;
-  symbol: string; // örn. BTC, THYAO, GRAM ALTIN, USD
+  symbol: string; // örn. BTC, THYAO, GRAM ALTIN
   name: string; // görünen ad
   quantity: number; // adet / lot / gram
-  buyPrice: number; // TL cinsinden birim alış fiyatı
+  buyPrice: number; // buyCurrency cinsinden birim alış fiyatı
+  buyCurrency: BuyCurrency; // hangi parayla alındı
+  // Alış anındaki USD/TRY kuru. TL↔USD çapraz çevirisi için saklanır;
+  // böylece "TL bazında %X, USD bazında %Y" farkı doğru çıkar.
+  buyUsdTry?: number;
   buyDate: string; // ISO tarih (reel getiri için)
-  // Kripto dışı varlıklarda kullanıcının girdiği güncel birim fiyat (TL).
-  // Kriptoda bu alan yok sayılır; fiyat CoinGecko'dan gelir.
+  // Kripto dışı varlıklarda kullanıcının girdiği güncel birim fiyat
+  // (buyCurrency cinsinden). Kriptoda yok sayılır; fiyat canlı gelir.
   manualPrice?: number;
   // Kripto ise CoinGecko id'si (örn. "bitcoin").
   coingeckoId?: string;
@@ -24,30 +40,38 @@ export interface Holding {
 
 // Uygulama ayarları.
 export interface Settings {
-  // Reel (enflasyona göre düzeltilmiş) getiri hesabı için yıllık enflasyon (%).
-  // Kullanıcı güncelleyebilir; TÜİK/beklenti neyse onu girer.
+  // Reel (enflasyona göre düzeltilmiş) getiri için yıllık enflasyon (%).
   annualInflation: number;
+  // Varsayılan görüntü para birimi.
+  displayCurrency: Currency;
 }
 
-// Bir pozisyonun canlı fiyatla hesaplanmış hali.
+// Bir kriptonun hem TL hem USD güncel fiyatı.
+export interface PricePair {
+  try: number;
+  usd: number;
+}
+
+// Bir pozisyonun seçilen para biriminde hesaplanmış hali.
 export interface HoldingValue {
   holding: Holding;
-  currentPrice: number; // TL birim güncel fiyat
-  cost: number; // toplam maliyet (quantity * buyPrice)
-  value: number; // toplam güncel değer (quantity * currentPrice)
-  pnl: number; // nominal kâr/zarar (value - cost)
+  currency: Currency; // bu değerler hangi para biriminde
+  currentPrice: number; // seçilen para biriminde birim güncel fiyat
+  cost: number; // toplam maliyet
+  value: number; // toplam güncel değer
+  pnl: number; // nominal kâr/zarar
   pnlPct: number; // nominal kâr/zarar %
-  realPnl: number; // enflasyona göre düzeltilmiş kâr/zarar (TL, bugünkü lira)
-  realPnlPct: number; // reel kâr/zarar %
   priceIsLive: boolean; // fiyat canlı mı yoksa manuel mi
 }
 
 export interface PortfolioSummary {
+  currency: Currency;
   totalValue: number;
   totalCost: number;
   totalPnl: number;
   totalPnlPct: number;
-  totalRealPnl: number;
-  totalRealPnlPct: number;
+  // Reel K/Z her zaman TL bazında (enflasyon TL kavramı) hesaplanır.
+  totalRealPnlTRY: number;
+  totalRealPnlPctTRY: number;
   items: HoldingValue[];
 }

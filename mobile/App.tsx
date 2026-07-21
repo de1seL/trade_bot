@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, StyleSheet, Modal, StatusBar, View } from 'react-native';
-import { Holding, Settings } from './src/types';
+import { Currency, Holding, PricePair, Settings } from './src/types';
 import { colors } from './src/theme';
 import {
   loadHoldings,
@@ -18,7 +18,8 @@ import { SettingsModal } from './src/screens/SettingsModal';
 export default function App() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [priceMap, setPriceMap] = useState<Record<string, number>>({});
+  const [priceMap, setPriceMap] = useState<Record<string, PricePair>>({});
+  const [usdTry, setUsdTry] = useState<number | null>(null);
   const [priceError, setPriceError] = useState<string | undefined>();
   const [refreshing, setRefreshing] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -28,6 +29,7 @@ export default function App() {
     setRefreshing(true);
     const res = await fetchPrices(list);
     setPriceMap(res.priceMap);
+    if (res.usdTry !== null) setUsdTry(res.usdTry);
     setPriceError(res.ok ? undefined : res.error);
     setRefreshing(false);
   }, []);
@@ -43,8 +45,8 @@ export default function App() {
   }, [refreshPrices]);
 
   const summary = useMemo(
-    () => buildSummary(holdings, priceMap, settings),
-    [holdings, priceMap, settings]
+    () => buildSummary(holdings, priceMap, usdTry, settings, settings.displayCurrency),
+    [holdings, priceMap, usdTry, settings]
   );
 
   const addHolding = useCallback(
@@ -73,14 +75,25 @@ export default function App() {
     setShowSettings(false);
   }, []);
 
+  const setCurrency = useCallback(
+    (c: Currency) => {
+      const s = { ...settings, displayCurrency: c };
+      setSettings(s);
+      saveSettings(s);
+    },
+    [settings]
+  );
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <SafeAreaView style={styles.root}>
         <PortfolioScreen
           summary={summary}
+          displayCurrency={settings.displayCurrency}
           refreshing={refreshing}
           priceError={priceError}
+          onSetCurrency={setCurrency}
           onRefresh={() => refreshPrices(holdings)}
           onAdd={() => setShowAdd(true)}
           onDelete={deleteHolding}
@@ -89,7 +102,11 @@ export default function App() {
       </SafeAreaView>
 
       <Modal visible={showAdd} animationType="slide" presentationStyle="pageSheet">
-        <AddHoldingScreen onAdd={addHolding} onClose={() => setShowAdd(false)} />
+        <AddHoldingScreen
+          currentUsdTry={usdTry}
+          onAdd={addHolding}
+          onClose={() => setShowAdd(false)}
+        />
       </Modal>
 
       <Modal

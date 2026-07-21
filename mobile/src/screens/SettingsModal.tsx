@@ -16,7 +16,10 @@ export function SettingsModal({
 
   function save() {
     const n = parseFloat(inflation.replace(',', '.'));
-    onSave({ annualInflation: isNaN(n) ? settings.annualInflation : n });
+    onSave({
+      ...settings,
+      annualInflation: isNaN(n) ? settings.annualInflation : n,
+    });
   }
 
   return (

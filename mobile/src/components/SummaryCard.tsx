@@ -2,22 +2,26 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { PortfolioSummary } from '../types';
 import { colors, spacing, radius } from '../theme';
-import { formatTRY, formatPct } from '../utils/format';
+import { formatMoney, formatTRY, formatPct } from '../utils/format';
 
 export function SummaryCard({ summary }: { summary: PortfolioSummary }) {
   const pnlColor = summary.totalPnl >= 0 ? colors.green : colors.red;
-  const realColor = summary.totalRealPnl >= 0 ? colors.green : colors.red;
+  const realColor = summary.totalRealPnlTRY >= 0 ? colors.green : colors.red;
 
   return (
     <View style={styles.card}>
       <Text style={styles.label}>Toplam Portföy Değeri</Text>
-      <Text style={styles.total}>{formatTRY(summary.totalValue)}</Text>
+      <Text style={styles.total}>
+        {formatMoney(summary.totalValue, summary.currency)}
+      </Text>
 
       <View style={styles.row}>
         <View style={styles.col}>
-          <Text style={styles.subLabel}>Nominal K/Z</Text>
+          <Text style={styles.subLabel}>
+            Nominal K/Z ({summary.currency === 'USD' ? 'USD' : 'TL'})
+          </Text>
           <Text style={[styles.pnl, { color: pnlColor }]}>
-            {formatTRY(summary.totalPnl)}
+            {formatMoney(summary.totalPnl, summary.currency)}
           </Text>
           <Text style={[styles.pnlPct, { color: pnlColor }]}>
             {formatPct(summary.totalPnlPct)}
@@ -25,12 +29,12 @@ export function SummaryCard({ summary }: { summary: PortfolioSummary }) {
         </View>
         <View style={styles.divider} />
         <View style={styles.col}>
-          <Text style={styles.subLabel}>Reel K/Z (enflasyona göre)</Text>
+          <Text style={styles.subLabel}>Reel K/Z (enflasyona göre, TL)</Text>
           <Text style={[styles.pnl, { color: realColor }]}>
-            {formatTRY(summary.totalRealPnl)}
+            {formatTRY(summary.totalRealPnlTRY)}
           </Text>
           <Text style={[styles.pnlPct, { color: realColor }]}>
-            {formatPct(summary.totalRealPnlPct)}
+            {formatPct(summary.totalRealPnlPctTRY)}
           </Text>
         </View>
       </View>
