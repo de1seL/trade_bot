@@ -45,8 +45,8 @@ export function MarketScreen() {
         cat === 'crypto' ? await fetchCryptoMarket() : await fetchGoldMarket();
       setQuotes(data);
       if (data.length === 0) setError('Veri gelmedi, tekrar dene');
-    } catch {
-      setError('Fiyatlar alınamadı (aşağı çekip tekrar dene)');
+    } catch (e: any) {
+      setError(`Fiyatlar alınamadı — ${e?.message ?? 'ağ hatası'} (aşağı çekip tekrar dene)`);
       setQuotes([]);
     } finally {
       setLoading(false);
