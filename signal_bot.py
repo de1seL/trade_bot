@@ -57,7 +57,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # Aynı anda kaç açık (kapanmamış) sinyal takip edilsin. Sinyal botunda
 # pozisyon/marj sınırı YOK → pratikte sınırsız (coin başına zaten tek sinyal).
 # Daha az bildirim istersen küçült (örn. 10).
-SIGNAL_MAX_ACTIVE = 100
+SIGNAL_MAX_ACTIVE = 100000   # fiilen SINIRSIZ — iyi sinyal veren HER coini yolla (cap yok)
 
 # Çıkış (TP/SL vurdu) mesajı da atılsın mı?
 SEND_EXIT_ALERTS  = True
