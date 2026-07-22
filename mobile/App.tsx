@@ -29,6 +29,8 @@ import {
 import { fetchMarket, CoinRef } from './src/prices';
 import { fetchStockQuotes, StockRef } from './src/prices/stocks';
 import { fetchGoldMarket } from './src/prices/market';
+import { fetchFxRates } from './src/prices/fx';
+import { fetchFundPrices } from './src/prices/funds';
 import { buildSummary } from './src/utils/portfolio';
 import { buildFuturesSummary } from './src/utils/futures';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
@@ -47,6 +49,8 @@ export default function App() {
   const [pairs, setPairs] = useState<Record<string, PricePair>>({}); // coingeckoId -> {try,usd}
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({}); // BIST sembol -> TL
   const [goldPrices, setGoldPrices] = useState<Record<string, number>>({}); // GRAM/ONS -> TL
+  const [fxRates, setFxRates] = useState<Record<string, number>>({}); // USD/EUR... -> TL
+  const [fundPrices, setFundPrices] = useState<Record<string, number>>({}); // fon kodu -> TL
   const [usdTry, setUsdTry] = useState<number | null>(null);
   const [priceError, setPriceError] = useState<string | undefined>();
   const [refreshing, setRefreshing] = useState(false);
@@ -85,13 +89,21 @@ export default function App() {
       }
 
       const hasGold = hList.some((h) => h.type === 'gold');
+      const hasFx = hList.some((h) => h.type === 'fx');
+      const fundCodes = Array.from(
+        new Set(hList.filter((h) => h.type === 'fund').map((h) => h.symbol))
+      );
 
-      const [res, stockQuotes, goldQuotes] = await Promise.all([
+      const [res, stockQuotes, goldQuotes, fxMap, fundMap] = await Promise.all([
         fetchMarket(refs),
         stockRefs.length > 0
           ? fetchStockQuotes(stockRefs).catch(() => [])
           : Promise.resolve([]),
         hasGold ? fetchGoldMarket().catch(() => []) : Promise.resolve([]),
+        hasFx ? fetchFxRates().catch(() => ({})) : Promise.resolve({}),
+        fundCodes.length > 0
+          ? fetchFundPrices(fundCodes).catch(() => ({}))
+          : Promise.resolve({}),
       ]);
 
       const sp: Record<string, number> = {};
@@ -102,6 +114,8 @@ export default function App() {
       setPairs(res.pairs);
       setStockPrices(sp);
       setGoldPrices(gp);
+      setFxRates(fxMap as Record<string, number>);
+      setFundPrices(fundMap as Record<string, number>);
       if (res.usdTry !== null) setUsdTry(res.usdTry);
       setPriceError(res.ok ? undefined : res.error);
       setRefreshing(false);
@@ -137,10 +151,16 @@ export default function App() {
       } else if (h.type === 'gold' && goldPrices[h.symbol] !== undefined) {
         const t = goldPrices[h.symbol];
         m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
+      } else if (h.type === 'fx' && fxRates[h.symbol] !== undefined) {
+        const t = fxRates[h.symbol];
+        m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
+      } else if (h.type === 'fund' && fundPrices[h.symbol] !== undefined) {
+        const t = fundPrices[h.symbol];
+        m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
       }
     }
     return m;
-  }, [holdings, pairs, stockPrices, goldPrices, usdTry]);
+  }, [holdings, pairs, stockPrices, goldPrices, fxRates, fundPrices, usdTry]);
 
   const summary = useMemo(
     () =>
