@@ -165,26 +165,40 @@ export async function fetchStockQuotes(refs: StockRef[]): Promise<MarketQuote[]>
 }
 
 // Hisse geçmiş fiyatı (grafik) — Yahoo v8 chart, TL kapanışlar.
+// minutes = toplam süre (dakika). Gün-altı için gün içi (intraday) mumlar.
 export async function fetchStockHistory(
   symbol: string,
-  days: number
+  minutes: number
 ): Promise<number[]> {
   const fullSymbol = symbol.endsWith('.IS') ? symbol : `${symbol}.IS`;
-  const range =
-    days <= 7
-      ? '5d'
-      : days <= 30
-      ? '1mo'
-      : days <= 90
-      ? '3mo'
-      : days <= 180
-      ? '6mo'
-      : days <= 365
-      ? '1y'
-      : days <= 730
-      ? '2y'
-      : '5y';
-  const interval = days <= 7 ? '60m' : '1d';
+  const days = minutes / 1440;
+
+  let range: string;
+  let interval: string;
+  let tail = 0; // gün-altı: son kaç noktayı alalım
+  if (minutes <= 1440) {
+    range = '1d';
+    const stepMin = minutes <= 240 ? 5 : 15;
+    interval = minutes <= 240 ? '5m' : '15m';
+    tail = Math.max(2, Math.ceil(minutes / stepMin));
+  } else {
+    range =
+      days <= 7
+        ? '5d'
+        : days <= 30
+        ? '1mo'
+        : days <= 90
+        ? '3mo'
+        : days <= 180
+        ? '6mo'
+        : days <= 365
+        ? '1y'
+        : days <= 730
+        ? '2y'
+        : '5y';
+    interval = days <= 7 ? '60m' : '1d';
+  }
+
   const url = `${YQ}/v8/finance/chart/${encodeURIComponent(
     fullSymbol
   )}?range=${range}&interval=${interval}`;
@@ -200,7 +214,8 @@ export async function fetchStockHistory(
     };
   };
   const closes = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-  const out = closes.filter((x): x is number => typeof x === 'number');
+  let out = closes.filter((x): x is number => typeof x === 'number');
+  if (tail > 0 && out.length > tail) out = out.slice(-tail);
   if (out.length < 2) throw new Error('Yahoo geçmiş yok');
   return out;
 }

@@ -18,12 +18,25 @@ import { LineChart } from './LineChart';
 
 type Kind = 'crypto' | 'stock';
 
-const RANGES: { label: string; days: number }[] = [
-  { label: '1G', days: 1 },
-  { label: '1H', days: 7 },
-  { label: '1A', days: 30 },
-  { label: '3A', days: 90 },
-  { label: '1Y', days: 365 },
+type Range = { label: string; minutes: number };
+
+const CRYPTO_RANGES: Range[] = [
+  { label: '15dk', minutes: 15 },
+  { label: '1sa', minutes: 60 },
+  { label: '4sa', minutes: 240 },
+  { label: '1g', minutes: 1440 },
+  { label: '1hf', minutes: 10080 },
+  { label: '1a', minutes: 43200 },
+  { label: '1y', minutes: 525600 },
+];
+
+const STOCK_RANGES: Range[] = [
+  { label: '1sa', minutes: 60 },
+  { label: '4sa', minutes: 240 },
+  { label: '1g', minutes: 1440 },
+  { label: '1hf', minutes: 10080 },
+  { label: '1a', minutes: 43200 },
+  { label: '1y', minutes: 525600 },
 ];
 
 export function AssetDetailModal({
@@ -37,7 +50,7 @@ export function AssetDetailModal({
   quote: MarketQuote | null;
   onClose: () => void;
 }) {
-  const [days, setDays] = useState(7);
+  const [minutes, setMinutes] = useState(1440); // varsayılan 1 gün
   const [data, setData] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -53,8 +66,8 @@ export function AssetDetailModal({
       try {
         const series =
           kind === 'crypto'
-            ? await fetchCryptoHistory(quote.key, quote.symbol, days)
-            : await fetchStockHistory(quote.symbol, days);
+            ? await fetchCryptoHistory(quote.key, quote.symbol, minutes)
+            : await fetchStockHistory(quote.symbol, minutes);
         if (!cancelled) setData(series);
       } catch (e: any) {
         if (!cancelled) {
@@ -68,20 +81,20 @@ export function AssetDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, quote, kind, days]);
+  }, [visible, quote, kind, minutes]);
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2;
   const up = quote ? quote.changePct >= 0 : true;
   const changeColor = up ? colors.green : colors.red;
 
-  // Kripto: 1G'den; Hisse: 1H'den (borsa gün içi yok).
-  const ranges = kind === 'crypto' ? RANGES : RANGES.slice(1);
-  const isPreset = ranges.some((r) => r.days === days);
+  const ranges = kind === 'crypto' ? CRYPTO_RANGES : STOCK_RANGES;
+  const isPreset = ranges.some((r) => r.minutes === minutes);
+  const customDays = Math.round(minutes / 1440);
 
   function applyCustom() {
     const n = Math.round(parseFloat(customText.replace(',', '.')));
     if (!isNaN(n) && n >= 1) {
-      setDays(Math.min(n, 1825)); // en fazla ~5 yıl
+      setMinutes(Math.min(n, 1825) * 1440); // gün → dakika, en fazla ~5 yıl
       setShowCustom(false);
     }
   }
@@ -125,15 +138,18 @@ export function AssetDetailModal({
         <View style={styles.rangeRow}>
           {ranges.map((r) => (
             <TouchableOpacity
-              key={r.days}
+              key={r.minutes}
               onPress={() => {
                 setShowCustom(false);
-                setDays(r.days);
+                setMinutes(r.minutes);
               }}
-              style={[styles.rangeBtn, days === r.days && styles.rangeBtnActive]}
+              style={[styles.rangeBtn, minutes === r.minutes && styles.rangeBtnActive]}
             >
               <Text
-                style={[styles.rangeText, days === r.days && styles.rangeTextActive]}
+                style={[
+                  styles.rangeText,
+                  minutes === r.minutes && styles.rangeTextActive,
+                ]}
               >
                 {r.label}
               </Text>
@@ -149,7 +165,7 @@ export function AssetDetailModal({
                 (showCustom || !isPreset) && styles.rangeTextActive,
               ]}
             >
-              {!isPreset ? `${days}G` : 'Özel'}
+              {!isPreset ? `${customDays}g` : 'Özel'}
             </Text>
           </TouchableOpacity>
         </View>
