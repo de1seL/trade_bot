@@ -47,12 +47,13 @@ function currentUnitPrice(
   currentUsdTry: number | null,
   target: Currency
 ): { price: number; isLive: boolean } {
+  // Canlı fiyatı olan her varlık (kripto veya hisse) onu kullanır.
   const pair = priceMap[h.id];
-  if (h.type === 'crypto' && pair) {
+  if (pair) {
     return { price: target === 'TRY' ? pair.try : pair.usd, isLive: true };
   }
 
-  // Kripto dışı: manuel fiyat (buyCurrency cinsinden), güncel kurla çevrilir.
+  // Canlı fiyatı yoksa: manuel fiyat (buyCurrency cinsinden), güncel kurla çevrilir.
   const manual =
     h.manualPrice && h.manualPrice > 0 ? h.manualPrice : h.buyPrice;
   const manualIsUsd = isUsdLike(h.buyCurrency);

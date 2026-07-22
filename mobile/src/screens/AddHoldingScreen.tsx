@@ -13,6 +13,8 @@ import { AssetType, BuyCurrency, Holding } from '../types';
 import { colors, spacing, radius, assetMeta } from '../theme';
 import { COINS, CoinOption } from '../prices/coins';
 import { CoinSearch } from '../components/CoinSearch';
+import { StockSearch } from '../components/StockSearch';
+import { StockRef } from '../prices/stocks';
 
 const TYPES: AssetType[] = ['crypto', 'stock', 'gold', 'fx', 'fund', 'cash'];
 const CURRENCIES: { value: BuyCurrency; label: string }[] = [
@@ -48,6 +50,7 @@ export function AddHoldingScreen({
 }) {
   const [type, setType] = useState<AssetType>('crypto');
   const [selectedCoin, setSelectedCoin] = useState<CoinOption | null>(COINS[0]);
+  const [selectedStock, setSelectedStock] = useState<StockRef | null>(null);
   const [symbol, setSymbol] = useState('');
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -58,6 +61,7 @@ export function AddHoldingScreen({
   const [error, setError] = useState('');
 
   const isCrypto = type === 'crypto';
+  const isStock = type === 'stock';
 
   function submit() {
     const qty = parseNum(quantity);
@@ -75,8 +79,15 @@ export function AddHoldingScreen({
       sym = selectedCoin.symbol;
       nm = selectedCoin.name;
       cgId = selectedCoin.coingeckoId;
+    } else if (isStock) {
+      if (!selectedStock) {
+        setError('Hisse seç');
+        return;
+      }
+      sym = selectedStock.symbol;
+      nm = selectedStock.name;
     } else if (!sym) {
-      setError('Sembol gir (örn. THYAO, GRAM ALTIN)');
+      setError('Sembol gir (örn. GRAM ALTIN, USD)');
       return;
     }
 
@@ -100,7 +111,8 @@ export function AddHoldingScreen({
       // Alış anındaki USD/TRY kuru saklanır (TL↔USD çevirisi için).
       buyUsdTry: currentUsdTry ?? undefined,
       buyDate,
-      manualPrice: isCrypto ? undefined : parseNum(manualPrice) || bp,
+      // Kripto ve hisse canlı fiyatla değerlenir; diğerleri manuel.
+      manualPrice: isCrypto || isStock ? undefined : parseNum(manualPrice) || bp,
       coingeckoId: cgId,
     };
     onAdd(holding);
@@ -142,12 +154,17 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>Coin</Text>
             <CoinSearch selected={selectedCoin} onSelect={setSelectedCoin} />
           </>
+        ) : isStock ? (
+          <>
+            <Text style={styles.fieldLabel}>Hisse (BIST)</Text>
+            <StockSearch selected={selectedStock} onSelect={setSelectedStock} />
+          </>
         ) : (
           <>
             <Text style={styles.fieldLabel}>Sembol</Text>
             <TextInput
               style={styles.input}
-              placeholder="THYAO, GRAM ALTIN, EUR…"
+              placeholder="GRAM ALTIN, EUR, USD…"
               placeholderTextColor={colors.textDim}
               value={symbol}
               onChangeText={setSymbol}
@@ -156,7 +173,7 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>Ad (opsiyonel)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Türk Hava Yolları…"
+              placeholder="Çeyrek Altın…"
               placeholderTextColor={colors.textDim}
               value={name}
               onChangeText={setName}
@@ -206,7 +223,7 @@ export function AddHoldingScreen({
           keyboardType="decimal-pad"
         />
 
-        {!isCrypto && (
+        {!isCrypto && !isStock && (
           <>
             <Text style={styles.fieldLabel}>
               Güncel Birim Fiyat ({curSymbol(buyCurrency)})

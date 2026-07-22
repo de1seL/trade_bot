@@ -27,6 +27,7 @@ import {
   DEFAULT_SETTINGS,
 } from './src/storage';
 import { fetchMarket, CoinRef } from './src/prices';
+import { fetchStockQuotes, StockRef } from './src/prices/stocks';
 import { buildSummary } from './src/utils/portfolio';
 import { buildFuturesSummary } from './src/utils/futures';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
@@ -43,6 +44,7 @@ export default function App() {
   const [futures, setFutures] = useState<FuturesPosition[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [pairs, setPairs] = useState<Record<string, PricePair>>({}); // coingeckoId -> {try,usd}
+  const [stockPrices, setStockPrices] = useState<Record<string, number>>({}); // BIST sembol -> TL
   const [usdTry, setUsdTry] = useState<number | null>(null);
   const [priceError, setPriceError] = useState<string | undefined>();
   const [refreshing, setRefreshing] = useState(false);
@@ -66,8 +68,32 @@ export default function App() {
       }
       for (const p of fList) add(p.coingeckoId, p.symbol);
 
-      const res = await fetchMarket(refs);
+      // Hisse holdingleri için Yahoo fiyatları (BIST sembolleriyle).
+      const stockRefs: StockRef[] = [];
+      const seenStock = new Set<string>();
+      for (const h of hList) {
+        if (h.type === 'stock' && !seenStock.has(h.symbol)) {
+          seenStock.add(h.symbol);
+          stockRefs.push({
+            symbol: h.symbol,
+            fullSymbol: `${h.symbol}.IS`,
+            name: h.name,
+          });
+        }
+      }
+
+      const [res, stockQuotes] = await Promise.all([
+        fetchMarket(refs),
+        stockRefs.length > 0
+          ? fetchStockQuotes(stockRefs).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      const sp: Record<string, number> = {};
+      for (const q of stockQuotes) sp[q.symbol] = q.priceTry;
+
       setPairs(res.pairs);
+      setStockPrices(sp);
       if (res.usdTry !== null) setUsdTry(res.usdTry);
       setPriceError(res.ok ? undefined : res.error);
       setRefreshing(false);
@@ -96,10 +122,14 @@ export default function App() {
     for (const h of holdings) {
       if (h.type === 'crypto' && h.coingeckoId && pairs[h.coingeckoId]) {
         m[h.id] = pairs[h.coingeckoId];
+      } else if (h.type === 'stock' && stockPrices[h.symbol] !== undefined) {
+        const t = stockPrices[h.symbol];
+        // Hisse TL; USD karşılığı güncel kurla.
+        m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
       }
     }
     return m;
-  }, [holdings, pairs]);
+  }, [holdings, pairs, stockPrices, usdTry]);
 
   const summary = useMemo(
     () =>
