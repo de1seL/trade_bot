@@ -56,6 +56,7 @@ export function AssetDetailModal({
   const [error, setError] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [customText, setCustomText] = useState('');
+  const [customUnit, setCustomUnit] = useState<'min' | 'hour' | 'day'>('day');
 
   useEffect(() => {
     if (!visible || !quote) return;
@@ -89,12 +90,22 @@ export function AssetDetailModal({
 
   const ranges = kind === 'crypto' ? CRYPTO_RANGES : STOCK_RANGES;
   const isPreset = ranges.some((r) => r.minutes === minutes);
-  const customDays = Math.round(minutes / 1440);
+
+  // Aktif özel aralığı kısa etiketle göster (23dk / 4sa / 12g).
+  const customLabel =
+    minutes < 60
+      ? `${minutes}dk`
+      : minutes < 1440
+      ? `${Math.round((minutes / 60) * 10) / 10}sa`
+      : `${Math.round(minutes / 1440)}g`;
+
+  const UNIT_FACTOR = { min: 1, hour: 60, day: 1440 } as const;
+  const MAX_MINUTES = 1825 * 1440; // ~5 yıl
 
   function applyCustom() {
     const n = Math.round(parseFloat(customText.replace(',', '.')));
     if (!isNaN(n) && n >= 1) {
-      setMinutes(Math.min(n, 1825) * 1440); // gün → dakika, en fazla ~5 yıl
+      setMinutes(Math.min(n * UNIT_FACTOR[customUnit], MAX_MINUTES));
       setShowCustom(false);
     }
   }
@@ -165,25 +176,55 @@ export function AssetDetailModal({
                 (showCustom || !isPreset) && styles.rangeTextActive,
               ]}
             >
-              {!isPreset ? `${customDays}g` : 'Özel'}
+              {!isPreset ? customLabel : 'Özel'}
             </Text>
           </TouchableOpacity>
         </View>
 
         {showCustom && (
-          <View style={styles.customRow}>
-            <TextInput
-              style={styles.customInput}
-              placeholder="Kaç gün? (örn. 14)"
-              placeholderTextColor={colors.textDim}
-              value={customText}
-              onChangeText={setCustomText}
-              keyboardType="number-pad"
-              onSubmitEditing={applyCustom}
-            />
-            <TouchableOpacity style={styles.customApply} onPress={applyCustom}>
-              <Text style={styles.customApplyText}>Uygula</Text>
-            </TouchableOpacity>
+          <View style={styles.customWrap}>
+            <View style={styles.unitRow}>
+              {([
+                { u: 'min', label: 'Dakika' },
+                { u: 'hour', label: 'Saat' },
+                { u: 'day', label: 'Gün' },
+              ] as const).map((x) => (
+                <TouchableOpacity
+                  key={x.u}
+                  onPress={() => setCustomUnit(x.u)}
+                  style={[styles.unitBtn, customUnit === x.u && styles.unitBtnActive]}
+                >
+                  <Text
+                    style={[
+                      styles.unitText,
+                      customUnit === x.u && styles.unitTextActive,
+                    ]}
+                  >
+                    {x.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.customRow}>
+              <TextInput
+                style={styles.customInput}
+                placeholder={
+                  customUnit === 'min'
+                    ? 'Kaç dakika? (örn. 90)'
+                    : customUnit === 'hour'
+                    ? 'Kaç saat? (örn. 6)'
+                    : 'Kaç gün? (örn. 14)'
+                }
+                placeholderTextColor={colors.textDim}
+                value={customText}
+                onChangeText={setCustomText}
+                keyboardType="number-pad"
+                onSubmitEditing={applyCustom}
+              />
+              <TouchableOpacity style={styles.customApply} onPress={applyCustom}>
+                <Text style={styles.customApplyText}>Uygula</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -241,7 +282,21 @@ const styles = StyleSheet.create({
   rangeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   rangeText: { color: colors.textDim, fontSize: 13, fontWeight: '700' },
   rangeTextActive: { color: '#fff' },
-  customRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  customWrap: { marginTop: spacing.md },
+  unitRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  unitBtn: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.sm,
+  },
+  unitBtnActive: { backgroundColor: colors.cardAlt, borderColor: colors.primary },
+  unitText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
+  unitTextActive: { color: colors.primary },
+  customRow: { flexDirection: 'row', gap: spacing.sm },
   customInput: {
     flex: 1,
     backgroundColor: colors.card,
