@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -136,6 +136,20 @@ export default function App() {
       setSettings(s);
       refreshMarket(h, f);
     })();
+  }, [refreshMarket]);
+
+  // Interval içinden en güncel listeleri okumak için ref.
+  const holdingsRef = useRef(holdings);
+  const futuresRef = useRef(futures);
+  holdingsRef.current = holdings;
+  futuresRef.current = futures;
+
+  // Otomatik yenileme: her 45 saniyede fiyatları arka planda güncelle.
+  useEffect(() => {
+    const id = setInterval(() => {
+      refreshMarket(holdingsRef.current, futuresRef.current);
+    }, 45000);
+    return () => clearInterval(id);
   }, [refreshMarket]);
 
   // Spot fiyat haritası: holding.id -> {try,usd}
