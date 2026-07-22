@@ -23,6 +23,11 @@ const CURRENCIES: { value: BuyCurrency; label: string }[] = [
   { value: 'USDT', label: 'USDT' },
   { value: 'USDC', label: 'USDC' },
 ];
+// Altın seçenekleri — Piyasa'daki altın kategorisiyle aynı.
+const GOLD_OPTIONS: { symbol: string; name: string }[] = [
+  { symbol: 'GRAM', name: 'Gram Altın' },
+  { symbol: 'ONS', name: 'Ons Altın' },
+];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -51,6 +56,7 @@ export function AddHoldingScreen({
   const [type, setType] = useState<AssetType>('crypto');
   const [selectedCoin, setSelectedCoin] = useState<CoinOption | null>(COINS[0]);
   const [selectedStock, setSelectedStock] = useState<StockRef | null>(null);
+  const [selectedGold, setSelectedGold] = useState(GOLD_OPTIONS[0]);
   const [symbol, setSymbol] = useState('');
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -62,6 +68,9 @@ export function AddHoldingScreen({
 
   const isCrypto = type === 'crypto';
   const isStock = type === 'stock';
+  const isGold = type === 'gold';
+  // Kripto dışında para birimi hep TL.
+  const priceCurrency: BuyCurrency = isCrypto ? buyCurrency : 'TRY';
 
   function submit() {
     const qty = parseNum(quantity);
@@ -86,8 +95,11 @@ export function AddHoldingScreen({
       }
       sym = selectedStock.symbol;
       nm = selectedStock.name;
+    } else if (isGold) {
+      sym = selectedGold.symbol;
+      nm = selectedGold.name;
     } else if (!sym) {
-      setError('Sembol gir (örn. GRAM ALTIN, USD)');
+      setError('Sembol gir (örn. USD, EUR)');
       return;
     }
 
@@ -107,12 +119,13 @@ export function AddHoldingScreen({
       name: nm || sym,
       quantity: qty,
       buyPrice: bp,
-      buyCurrency,
+      buyCurrency: priceCurrency,
       // Alış anındaki USD/TRY kuru saklanır (TL↔USD çevirisi için).
       buyUsdTry: currentUsdTry ?? undefined,
       buyDate,
-      // Kripto ve hisse canlı fiyatla değerlenir; diğerleri manuel.
-      manualPrice: isCrypto || isStock ? undefined : parseNum(manualPrice) || bp,
+      // Kripto, hisse ve altın canlı fiyatla değerlenir; diğerleri manuel.
+      manualPrice:
+        isCrypto || isStock || isGold ? undefined : parseNum(manualPrice) || bp,
       coingeckoId: cgId,
     };
     onAdd(holding);
@@ -159,12 +172,37 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>Hisse (BIST)</Text>
             <StockSearch selected={selectedStock} onSelect={setSelectedStock} />
           </>
+        ) : isGold ? (
+          <>
+            <Text style={styles.fieldLabel}>Altın türü</Text>
+            <View style={styles.chips}>
+              {GOLD_OPTIONS.map((g) => (
+                <TouchableOpacity
+                  key={g.symbol}
+                  onPress={() => setSelectedGold(g)}
+                  style={[
+                    styles.chip,
+                    selectedGold.symbol === g.symbol && styles.chipActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      selectedGold.symbol === g.symbol && styles.chipTextActive,
+                    ]}
+                  >
+                    {g.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         ) : (
           <>
             <Text style={styles.fieldLabel}>Sembol</Text>
             <TextInput
               style={styles.input}
-              placeholder="GRAM ALTIN, EUR, USD…"
+              placeholder="USD, EUR…"
               placeholderTextColor={colors.textDim}
               value={symbol}
               onChangeText={setSymbol}
@@ -173,7 +211,7 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>Ad (opsiyonel)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Çeyrek Altın…"
+              placeholder="Amerikan Doları…"
               placeholderTextColor={colors.textDim}
               value={name}
               onChangeText={setName}
@@ -181,25 +219,29 @@ export function AddHoldingScreen({
           </>
         )}
 
-        <Text style={styles.fieldLabel}>Hangi parayla aldın?</Text>
-        <View style={styles.chips}>
-          {CURRENCIES.map((c) => (
-            <TouchableOpacity
-              key={c.value}
-              onPress={() => setBuyCurrency(c.value)}
-              style={[styles.chip, buyCurrency === c.value && styles.chipActive]}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  buyCurrency === c.value && styles.chipTextActive,
-                ]}
-              >
-                {c.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {isCrypto && (
+          <>
+            <Text style={styles.fieldLabel}>Hangi parayla aldın?</Text>
+            <View style={styles.chips}>
+              {CURRENCIES.map((c) => (
+                <TouchableOpacity
+                  key={c.value}
+                  onPress={() => setBuyCurrency(c.value)}
+                  style={[styles.chip, buyCurrency === c.value && styles.chipActive]}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      buyCurrency === c.value && styles.chipTextActive,
+                    ]}
+                  >
+                    {c.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
 
         <Text style={styles.fieldLabel}>Adet / Miktar</Text>
         <TextInput
@@ -212,7 +254,7 @@ export function AddHoldingScreen({
         />
 
         <Text style={styles.fieldLabel}>
-          Birim Alış Fiyatı ({curSymbol(buyCurrency)})
+          Birim Alış Fiyatı ({curSymbol(priceCurrency)})
         </Text>
         <TextInput
           style={styles.input}
@@ -223,10 +265,10 @@ export function AddHoldingScreen({
           keyboardType="decimal-pad"
         />
 
-        {!isCrypto && !isStock && (
+        {!isCrypto && !isStock && !isGold && (
           <>
             <Text style={styles.fieldLabel}>
-              Güncel Birim Fiyat ({curSymbol(buyCurrency)})
+              Güncel Birim Fiyat ({curSymbol(priceCurrency)})
             </Text>
             <TextInput
               style={styles.input}

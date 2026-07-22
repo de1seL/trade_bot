@@ -28,6 +28,7 @@ import {
 } from './src/storage';
 import { fetchMarket, CoinRef } from './src/prices';
 import { fetchStockQuotes, StockRef } from './src/prices/stocks';
+import { fetchGoldMarket } from './src/prices/market';
 import { buildSummary } from './src/utils/portfolio';
 import { buildFuturesSummary } from './src/utils/futures';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
@@ -45,6 +46,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [pairs, setPairs] = useState<Record<string, PricePair>>({}); // coingeckoId -> {try,usd}
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({}); // BIST sembol -> TL
+  const [goldPrices, setGoldPrices] = useState<Record<string, number>>({}); // GRAM/ONS -> TL
   const [usdTry, setUsdTry] = useState<number | null>(null);
   const [priceError, setPriceError] = useState<string | undefined>();
   const [refreshing, setRefreshing] = useState(false);
@@ -82,18 +84,24 @@ export default function App() {
         }
       }
 
-      const [res, stockQuotes] = await Promise.all([
+      const hasGold = hList.some((h) => h.type === 'gold');
+
+      const [res, stockQuotes, goldQuotes] = await Promise.all([
         fetchMarket(refs),
         stockRefs.length > 0
           ? fetchStockQuotes(stockRefs).catch(() => [])
           : Promise.resolve([]),
+        hasGold ? fetchGoldMarket().catch(() => []) : Promise.resolve([]),
       ]);
 
       const sp: Record<string, number> = {};
       for (const q of stockQuotes) sp[q.symbol] = q.priceTry;
+      const gp: Record<string, number> = {};
+      for (const q of goldQuotes) gp[q.symbol] = q.priceTry;
 
       setPairs(res.pairs);
       setStockPrices(sp);
+      setGoldPrices(gp);
       if (res.usdTry !== null) setUsdTry(res.usdTry);
       setPriceError(res.ok ? undefined : res.error);
       setRefreshing(false);
@@ -126,10 +134,13 @@ export default function App() {
         const t = stockPrices[h.symbol];
         // Hisse TL; USD karşılığı güncel kurla.
         m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
+      } else if (h.type === 'gold' && goldPrices[h.symbol] !== undefined) {
+        const t = goldPrices[h.symbol];
+        m[h.id] = { try: t, usd: usdTry ? t / usdTry : 0 };
       }
     }
     return m;
-  }, [holdings, pairs, stockPrices, usdTry]);
+  }, [holdings, pairs, stockPrices, goldPrices, usdTry]);
 
   const summary = useMemo(
     () =>
