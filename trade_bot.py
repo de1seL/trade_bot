@@ -165,7 +165,7 @@ CONFIG = {
     "partial_tp_enabled"  : True,
     "partial_tp_r"        : 1.0,          # kaçıncı R'de kısmi al (1R)
     "partial_tp_frac"     : 0.5,          # ne kadarını kapat (yarısı)
-    "partial_runner_rr"   : 3.0,          # backtest: 3R en iyi (PF 1.53 vs 1.5R'de 1.42) — sezgi yanıldı, veri kazandı
+    "partial_runner_rr"   : 1.5,          # sl=1.0 ile en iyi kombinasyon (PF 1.53); 3.0 birlikte kötüledi (1.43)
 
     # ── Giriş eşiği ─────────────────────────────────────────
     "min_conditions"      : 3,    # 5 koşuldan en az 3'ü. Veri: score 2 → WR%29 -6.34, score 3+ → WR%74 +9.36.
