@@ -1,28 +1,32 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║   📊 backtest.py — trade_bot stratejisini GEÇMİŞTE test eder  ║
+║   📊 backtest.py — stratejiyi GEÇMİŞTE test + SWEEP eder      ║
 ╠══════════════════════════════════════════════════════════════╣
 
 Ne yapar:
   • trade_bot.py'deki AYNI strateji beynini kullanır (calc_entry, get_signal,
-    calc_trend, compute_sltp...). Kopyalamaz → import eder.
-  • Geçmiş 1h mumları çeker, her kapanmış mumda sinyal üretir, pozisyonu
-    SL / kısmi-kâr(@1R) / başabaş / koşucu-TP / zaman-limiti ile simüle eder.
-  • Çıktı: toplam işlem, GERÇEK win rate (pozisyon bazında), net %, ortalama
-    kazanç/zarar, profit factor, en iyi/kötü coinler.
+    calc_trend...). Kopyalamaz → import eder (tek kaynak).
+  • Girişleri BİR KEZ hesaplar (yavaş kısım), sonra çıkış ayarlarını (R:R,
+    kısmi-kâr...) SANİYELER içinde tarar (sweep) → en iyi ayarı rakamla bulur.
+  • Çıktı: gerçek (pozisyon-bazlı) WR, net%, ort kazanç/zarar, Profit Factor.
 
-Ne yapmaz:
-  • Emir göndermez, para riski YOK. API anahtarı GEREKMEZ (halka açık veri).
+İKİ MOD (aşağıda BT_SWEEP ile seçilir):
+  • BT_SWEEP = None            → sadece mevcut config'i test et (baseline)
+  • BT_SWEEP = ("param",[...]) → o parametreyi verilen değerlerde tara,
+                                  her biri için PF'yi yan yana göster
+    Örnek çıkış-parametre taramaları:
+      ("partial_runner_rr", [1.5, 2.0, 2.5, 3.0])
+      ("partial_tp_enabled", [True, False])
+      ("atr_sl_mult", [1.0, 1.3, 1.6, 2.0])
+      ("rr_ratio", [1.5, 2.0, 2.5])          # partial kapalıyken tek TP hedefi
+    ⚠️ Sadece ÇIKIŞ parametreleri hızlı taranır (girişler değişmez). Giriş
+       parametreleri (min_conditions, adx... indikatörler) için BT_SWEEP_ENTRY=True yap
+       → her değer için baştan hesaplar (yavaş ama doğru).
 
-⚠️  Yaklaşımlar (dürüst sınırlar):
-  • 5m/15m alt-zaman teyidi (LTF) backtest'te KAPALI (geçmiş hizalaması zor).
-    → Canlıda LTF birkaç girişi daha eler; backtest biraz iyimser olabilir.
-  • Dinamik volatil coin tarayıcı geçmişte çalıştırılamaz → SABİT coin listesi
-    (aşağıda BT_SYMBOLS) test edilir. Listeyi kendi coinlerinle değiştir.
-  • Aynı mumda hem TP hem SL varsa: önce kısmi-TP, sonra SL varsayılır (hafif iyimser).
+Sınırlar (dürüst): LTF(5m/15m) kapalı, sabit coin listesi, aynı-mum TP/SL iyimser.
+API anahtarı GEREKMEZ, emir YOK.
 
 Çalıştırma:  python backtest.py
-Ayarlar için aşağıdaki BT_* değişkenlerini düzenle.
 """
 
 import ccxt
@@ -34,23 +38,28 @@ cfg = tb.CONFIG
 log = tb.log
 
 # ─────────────────────────────────────────────────────────────
-# BACKTEST AYARLARI
+# AYARLAR
 # ─────────────────────────────────────────────────────────────
 
-# Test edilecek coinler (sabit liste — dinamik tarayıcı geçmişte çalışmaz).
-# İstediğin coinleri ekle/çıkar. Uzun geçmişi olan likit coinler daha sağlıklı.
 BT_SYMBOLS = [
     "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT",
     "XRP/USDT:USDT", "DOGE/USDT:USDT", "AVAX/USDT:USDT", "LINK/USDT:USDT",
     "ADA/USDT:USDT", "DOT/USDT:USDT", "KAITO/USDT:USDT", "GALA/USDT:USDT",
 ]
 
-BT_1H_LIMIT   = 1000     # kaç 1h mum test edilsin (~42 gün). Borsa limiti ~1000-1500.
-BT_4H_LIMIT   = 500      # 4h geçmişi (EMA200 için ≥214 gerekli — direkt çekilir)
-BT_1D_LIMIT   = 400      # 1d geçmişi (rejim/EMA200 için)
-BT_WARMUP     = 50       # ilk N 1h mumu atla (garanti ısınma)
-BT_WINDOW     = 320      # her mumda strateji beynine verilecek geriye dönük 1h penceresi
-BT_USE_BTC    = True     # BTC filtresi backtest'te de uygulansın mı (gerçekçi)
+BT_1H_LIMIT = 1000
+BT_4H_LIMIT = 500
+BT_1D_LIMIT = 400
+BT_WARMUP   = 50
+BT_WINDOW   = 320
+BT_USE_BTC  = True
+
+# ── SWEEP (tarama) ─────────────────────────────────────────────
+# None → sadece baseline. Veya (param_adı, [değerler]) → tarama.
+BT_SWEEP = ("partial_runner_rr", [1.5, 2.0, 2.5, 3.0])
+# Giriş parametresi mi tarıyorsun? (min_conditions, adx_max, indikatör flag'i...)
+# True yaparsan her değer için girişler baştan hesaplanır (yavaş).
+BT_SWEEP_ENTRY = False
 
 # ─────────────────────────────────────────────────────────────
 # VERİ
@@ -70,15 +79,15 @@ def fetch_tf(ex, symbol, tf, limit) -> pd.DataFrame:
     return df
 
 # ─────────────────────────────────────────────────────────────
-# POZİSYON SİMÜLASYONU (kısmi-kâr + başabaş + koşucu-TP + zaman)
+# ÇIKIŞ SİMÜLASYONU (kısmi-kâr + başabaş + koşucu-TP + zaman)
 # ─────────────────────────────────────────────────────────────
 
 def simulate_position(df1h, i, side, entry, atr):
-    """i. mumun KAPANIŞINDA açılan pozisyonu ileri mumlarla simüle eder.
-    Döner: (net_roi_pct_kaldıraçlı, reason, bars_held) — net_roi TÜM pozisyon (kısmi+koşucu)."""
+    """i. mumun kapanışında açılan pozisyonu ileri mumlarla simüle eder.
+    CONFIG'in ÇIKIŞ ayarlarını okur → sweep bunları değiştirip yeniden çağırır."""
     lev  = int(cfg["leverage"])
-    cost = (cfg["commission"] + cfg["slippage"]) * 2 * 100 * lev   # gidiş-dönüş maliyet (kaldıraçlı %)
-    sl, _tp_ignored = tb.compute_sltp(entry, atr, side)
+    cost = (cfg["commission"] + cfg["slippage"]) * 2 * 100 * lev
+    sl, _ = tb.compute_sltp(entry, atr, side)
     sl_dist = abs(entry - sl)
     if sl_dist <= 0:
         return None
@@ -98,13 +107,10 @@ def simulate_position(df1h, i, side, entry, atr):
         be  = entry * 0.9999
 
     def roi(exit_px, portion):
-        if side == "LONG":
-            p = (exit_px / entry - 1) * 100 * lev
-        else:
-            p = (entry / exit_px - 1) * 100 * lev
+        p = (exit_px / entry - 1) * 100 * lev if side == "LONG" else (entry / exit_px - 1) * 100 * lev
         return (p - cost) * portion
 
-    max_bars = max(1, int(cfg["max_pos_hours"]))   # 1h mum = 1 saat
+    max_bars = max(1, int(cfg["max_pos_hours"]))
     partial_done = False
     realized = 0.0
     n = len(df1h)
@@ -116,16 +122,14 @@ def simulate_position(df1h, i, side, entry, atr):
         bar = df1h.iloc[j]
         hi, lo = float(bar["high"]), float(bar["low"])
         cur_sl = be if partial_done else sl
-
         if side == "LONG":
-            if partial and not partial_done and hi >= tp1:     # kısmi-kâr @1R
+            if partial and not partial_done and hi >= tp1:
                 realized += roi(tp1, frac); partial_done = True
-            if lo <= cur_sl:                                    # SL / başabaş
+            if lo <= cur_sl:
                 rem = (1 - frac) if partial_done else 1.0
                 realized += roi(cur_sl, rem)
-                reason = "BREAKEVEN" if (partial_done and cur_sl >= entry) else "STOP_LOSS"
-                return realized, reason, k
-            if hi >= tp2:                                       # koşucu hedef
+                return realized, ("BREAKEVEN" if (partial_done and cur_sl >= entry) else "STOP_LOSS"), k
+            if hi >= tp2:
                 rem = (1 - frac) if partial_done else 1.0
                 realized += roi(tp2, rem)
                 return realized, "TAKE_PROFIT", k
@@ -135,14 +139,12 @@ def simulate_position(df1h, i, side, entry, atr):
             if hi >= cur_sl:
                 rem = (1 - frac) if partial_done else 1.0
                 realized += roi(cur_sl, rem)
-                reason = "BREAKEVEN" if (partial_done and cur_sl <= entry) else "STOP_LOSS"
-                return realized, reason, k
+                return realized, ("BREAKEVEN" if (partial_done and cur_sl <= entry) else "STOP_LOSS"), k
             if lo <= tp2:
                 rem = (1 - frac) if partial_done else 1.0
                 realized += roi(tp2, rem)
                 return realized, "TAKE_PROFIT", k
 
-    # Zaman limiti → son mum kapanışında kapat
     j = min(n - 1, i + max_bars)
     exit_px = float(df1h.iloc[j]["close"])
     rem = (1 - frac) if partial_done else 1.0
@@ -150,31 +152,43 @@ def simulate_position(df1h, i, side, entry, atr):
     return realized, "TIME_LIMIT", (j - i)
 
 # ─────────────────────────────────────────────────────────────
-# TEK COİN BACKTEST
+# GİRİŞ TOPLAMA (yavaş kısım — BİR KEZ çalışır)
 # ─────────────────────────────────────────────────────────────
 
-def backtest_symbol(ex, symbol, df1h, df4h, df1d, btc1h):
-    trades = []
+def collect_entries(sym, df1h, df4h, df1d, btc1h):
+    """Stratejiyi geçmişte çalıştırır, SADECE giriş sinyallerini toplar
+    (çıkış simülasyonu YAPMAZ). 4h/1d trend cache'lenir → hız."""
+    entries = []
     n = len(df1h)
-    j_next_free = 0   # bu bardan önce yeni pozisyon açılamaz (mevcut açık)
+    j_free = 0
+    cache = {"n4": -1, "n1d": -1, "trend": None, "daily": None}
 
     for i in range(BT_WARMUP, n - 1):
-        if i < j_next_free:
+        if i < j_free:
             continue
-        now = df1h.index[i] + pd.Timedelta(hours=1)   # i. mumun KAPANIŞ zamanı (lookahead yok)
-
-        # Kapanmış üst zaman dilimi mumları (forming olanı dahil etme)
+        now = df1h.index[i] + pd.Timedelta(hours=1)
         d4 = df4h[df4h.index + pd.Timedelta(hours=4) <= now]
-        dd = df1d[df1d.index + pd.Timedelta(days=1)  <= now]
-        d1 = df1h.iloc[max(0, i - BT_WINDOW): i + 1]
-        if len(d4) < cfg["ema_trend"] + cfg["adx_period"] or len(dd) < 5 or len(d1) < 60:
+        dd = df1d[df1d.index + pd.Timedelta(days=1) <= now]
+        if len(d4) < cfg["ema_trend"] + cfg["adx_period"] or len(dd) < 5:
             continue
 
+        # 4h/1d yalnızca yeni mum kapanınca yeniden hesapla (büyük hızlanma)
+        if len(d4) != cache["n4"]:
+            try: cache["trend"] = tb.calc_trend(d4.copy())
+            except Exception: cache["trend"] = None
+            cache["n4"] = len(d4)
+        if len(dd) != cache["n1d"]:
+            try: cache["daily"] = tb.calc_daily_trend(dd.copy())
+            except Exception: cache["daily"] = "NONE"
+            cache["n1d"] = len(dd)
+        trend, daily = cache["trend"], cache["daily"]
+        if trend is None:
+            continue
+
+        d1 = df1h.iloc[max(0, i - BT_WINDOW): i + 1]
+        if len(d1) < 60:
+            continue
         try:
-            daily = tb.calc_daily_trend(dd.copy())
-            trend = tb.calc_trend(d4.copy())
-            if trend is None:
-                continue
             entry = tb.calc_entry(d1.copy())
             if entry is None:
                 continue
@@ -182,108 +196,161 @@ def backtest_symbol(ex, symbol, df1h, df4h, df1d, btc1h):
         except Exception:
             continue
 
-        # BTC 1h değişimi (filtre için)
         btc_chg = 0.0
-        if BT_USE_BTC and btc1h is not None and len(btc1h) > i:
-            try:
-                bwin = btc1h[btc1h.index <= df1h.index[i]]
-                if len(bwin) >= 2:
-                    btc_chg = (float(bwin["close"].iloc[-1]) / float(bwin["close"].iloc[-2]) - 1)
-            except Exception:
-                btc_chg = 0.0
+        if BT_USE_BTC and btc1h is not None:
+            b = btc1h[btc1h.index <= df1h.index[i]]
+            if len(b) >= 2:
+                btc_chg = float(b["close"].iloc[-1]) / float(b["close"].iloc[-2]) - 1
 
-        # LTF backtest'te kapalı → tf5=tf15=NONE (engellemez)
         signal = tb.get_signal(trend, entry, daily, btc_chg, entry_trend, "NONE", "NONE")
-
         if signal in ("LONG", "SHORT"):
             price = float(d1["close"].iloc[-1])
-            res = simulate_position(df1h, i, signal, price, entry["atr"])
-            if res is None:
-                continue
-            net, reason, bars = res
-            trades.append({"time": df1h.index[i], "symbol": symbol.split("/")[0],
-                           "side": signal, "net": net, "reason": reason, "bars": bars})
-            j_next_free = i + bars + 1   # pozisyon kapanana kadar yeni açma (tek pozisyon/coin)
+            entries.append({"sym": sym.split("/")[0], "i": i, "side": signal,
+                            "price": price, "atr": entry["atr"]})
+            # pozisyon kapanana kadar yeni açma → kaba tahmin: max_pos_hours ilerlet
+            j_free = i + max(1, int(cfg["max_pos_hours"])) + 1
 
+    return entries
+
+# ─────────────────────────────────────────────────────────────
+# ÇIKIŞ DEĞERLENDİRME (hızlı — sweep bunu tekrar çağırır)
+# ─────────────────────────────────────────────────────────────
+
+def simulate_all(entries, dfmap):
+    trades = []
+    for e in entries:
+        df1h = dfmap[e["sym"]]
+        res = simulate_position(df1h, e["i"], e["side"], e["price"], e["atr"])
+        if res is None:
+            continue
+        net, reason, bars = res
+        trades.append({"symbol": e["sym"], "side": e["side"], "net": net, "reason": reason})
     return trades
 
-# ─────────────────────────────────────────────────────────────
-# İSTATİSTİK
-# ─────────────────────────────────────────────────────────────
 
-def report(trades):
+def stats(trades):
     if not trades:
-        log.info("⚠️  Hiç işlem üretilmedi (period/coin/filtre çok kısıtlayıcı olabilir).")
-        return
+        return None
     n = len(trades)
-    wins = [t for t in trades if t["net"] > 0]
-    loss = [t for t in trades if t["net"] <= 0]
-    gross_win = sum(t["net"] for t in wins)
-    gross_loss = -sum(t["net"] for t in loss)
-    net = sum(t["net"] for t in trades)
-    wr = len(wins) / n * 100
-    avg_w = gross_win / len(wins) if wins else 0
-    avg_l = -gross_loss / len(loss) if loss else 0
-    pf = (gross_win / gross_loss) if gross_loss > 0 else float("inf")
-    expectancy = net / n
+    wins = [t["net"] for t in trades if t["net"] > 0]
+    loss = [t["net"] for t in trades if t["net"] <= 0]
+    gw = sum(wins); gl = -sum(loss)
+    pf = (gw / gl) if gl > 0 else float("inf")
+    return {"n": n, "wr": len(wins) / n * 100, "net": sum(t["net"] for t in trades),
+            "avg_w": (gw / len(wins)) if wins else 0, "avg_l": (-gl / len(loss)) if loss else 0,
+            "pf": pf, "trades": trades}
 
-    from collections import defaultdict, Counter
-    byr = Counter(t["reason"] for t in trades)
-    byc = defaultdict(float)
-    for t in trades:
-        byc[t["symbol"]] += t["net"]
 
+def report(s):
+    from collections import Counter, defaultdict
     log.info("\n" + "═" * 56)
     log.info("  📊 BACKTEST SONUCU  (net = kaldıraçlı ROI %, pozisyon başına)")
     log.info("═" * 56)
-    log.info(f"  İşlem sayısı   : {n}")
-    log.info(f"  GERÇEK Win Rate: %{wr:.1f}  ({len(wins)}W / {len(loss)}L)")
-    log.info(f"  Net (toplam)   : {net:+.1f}%   (işlem başına beklenti: {expectancy:+.2f}%)")
-    log.info(f"  Ort. kazanç    : {avg_w:+.2f}%     Ort. zarar: {avg_l:+.2f}%")
-    log.info(f"  Kazanç/Zarar   : {(avg_w/abs(avg_l) if avg_l else 0):.2f} : 1")
-    log.info(f"  Profit Factor  : {pf:.2f}   (>1 kârlı, >1.3 iyi)")
+    log.info(f"  İşlem sayısı   : {s['n']}")
+    log.info(f"  GERÇEK Win Rate: %{s['wr']:.1f}")
+    log.info(f"  Net (toplam)   : {s['net']:+.1f}%   (beklenti: {s['net']/s['n']:+.2f}%/işlem)")
+    log.info(f"  Ort. kazanç    : {s['avg_w']:+.2f}%     Ort. zarar: {s['avg_l']:+.2f}%")
+    log.info(f"  Profit Factor  : {s['pf']:.2f}   (>1 kârlı, >1.3 iyi, >1.5 harika)")
+    byr = Counter(t["reason"] for t in s["trades"])
     log.info(f"  Çıkış nedenleri: " + "  ".join(f"{k}={v}" for k, v in byr.most_common()))
+    byc = defaultdict(float)
+    for t in s["trades"]:
+        byc[t["symbol"]] += t["net"]
     log.info("  ── Coin bazında net ──")
     for c, v in sorted(byc.items(), key=lambda x: -x[1]):
         log.info(f"     {c:8} {v:+7.1f}%")
     log.info("═" * 56)
-    log.info("  Not: net % kaldıraçlı. $ karşılığı ≈ (marj × net/100). LTF kapalı,")
-    log.info("       sabit coin listesi — canlı sonuç birebir aynı olmayabilir.")
-    log.info("═" * 56 + "\n")
 
 # ─────────────────────────────────────────────────────────────
 # ANA
 # ─────────────────────────────────────────────────────────────
 
-def main():
-    log.info("📊 Backtest başlıyor — strateji beyni: trade_bot.py (aynı)")
-    log.info(f"   Coinler: {len(BT_SYMBOLS)}   1h mum: {BT_1H_LIMIT}   LTF: kapalı")
-    ex = connect()
-
-    # BTC referansı (filtre için)
+def load_data(ex):
+    dfmap = {}
     btc1h = None
     if BT_USE_BTC:
-        try:
-            btc1h = fetch_tf(ex, "BTC/USDT:USDT", "1h", BT_1H_LIMIT)
-        except Exception as e:
-            log.warning(f"⚠️  BTC verisi çekilemedi, BTC filtresi backtest'te atlanacak: {e}")
-
-    all_trades = []
+        try: btc1h = fetch_tf(ex, "BTC/USDT:USDT", "1h", BT_1H_LIMIT)
+        except Exception as e: log.warning(f"⚠️  BTC verisi yok: {e}")
+    meta = {}
     for sym in BT_SYMBOLS:
         try:
             df1h = fetch_tf(ex, sym, "1h", BT_1H_LIMIT)
-            df4h = fetch_tf(ex, sym, "4h", BT_4H_LIMIT)   # EMA200 için direkt (resample değil)
+            df4h = fetch_tf(ex, sym, "4h", BT_4H_LIMIT)
             df1d = fetch_tf(ex, sym, "1d", BT_1D_LIMIT)
             if len(df1h) < BT_WARMUP + 50:
-                log.info(f"   [{sym}] yetersiz geçmiş ({len(df1h)} mum), atlandı")
-                continue
-            tr = backtest_symbol(ex, sym, df1h, df4h, df1d, btc1h)
-            log.info(f"   [{sym.split('/')[0]:8}] {len(tr)} işlem")
-            all_trades.extend(tr)
+                log.info(f"   [{sym}] yetersiz geçmiş, atlandı"); continue
+            key = sym.split("/")[0]
+            dfmap[key] = df1h
+            meta[sym] = (df1h, df4h, df1d)
         except Exception as e:
-            log.warning(f"   [{sym}] backtest hatası, atlandı: {e}")
+            log.warning(f"   [{sym}] veri hatası: {e}")
+    return dfmap, meta, btc1h
 
-    report(all_trades)
+
+def gather_all_entries(meta, btc1h):
+    entries = []
+    for sym, (df1h, df4h, df1d) in meta.items():
+        e = collect_entries(sym, df1h, df4h, df1d, btc1h)
+        log.info(f"   [{sym.split('/')[0]:8}] {len(e)} sinyal")
+        entries.extend(e)
+    return entries
+
+
+def main():
+    log.info("📊 Backtest başlıyor — strateji beyni: trade_bot.py")
+    log.info(f"   Coinler: {len(BT_SYMBOLS)}  1h mum: {BT_1H_LIMIT}  LTF: kapalı")
+    ex = connect()
+    dfmap, meta, btc1h = load_data(ex)
+
+    if not BT_SWEEP:
+        # ── BASELINE ──
+        entries = gather_all_entries(meta, btc1h)
+        s = stats(simulate_all(entries, dfmap))
+        if s: report(s)
+        else: log.info("⚠️  Hiç işlem yok.")
+        return
+
+    param, values = BT_SWEEP
+    log.info(f"\n🔬 SWEEP: '{param}' → {values}   (giriş-tekrar={'AÇIK' if BT_SWEEP_ENTRY else 'kapalı'})\n")
+
+    if not BT_SWEEP_ENTRY:
+        # Girişleri BİR KEZ topla, çıkış paramını hızlıca tara
+        entries = gather_all_entries(meta, btc1h)
+        _orig = cfg.get(param)
+        log.info(f"\n  {'değer':>10} | {'işlem':>5} | {'WR%':>5} | {'net%':>7} | {'ort+':>6} | {'ort-':>7} | {'PF':>5}")
+        log.info("  " + "-" * 62)
+        best = None
+        for v in values:
+            cfg[param] = v
+            s = stats(simulate_all(entries, dfmap))
+            if s:
+                log.info(f"  {str(v):>10} | {s['n']:>5} | {s['wr']:>5.1f} | {s['net']:>+7.1f} | {s['avg_w']:>+6.1f} | {s['avg_l']:>+7.1f} | {s['pf']:>5.2f}")
+                if best is None or s["pf"] > best[1]:
+                    best = (v, s["pf"])
+        cfg[param] = _orig
+        if best:
+            log.info("  " + "-" * 62)
+            log.info(f"  🏆 En iyi: {param} = {best[0]}  (PF {best[1]:.2f})")
+    else:
+        # Giriş parametresi → her değer için baştan hesapla (yavaş)
+        _orig = cfg.get(param)
+        log.info(f"\n  {'değer':>10} | {'işlem':>5} | {'WR%':>5} | {'net%':>7} | {'PF':>5}")
+        log.info("  " + "-" * 46)
+        best = None
+        for v in values:
+            cfg[param] = v
+            entries = gather_all_entries(meta, btc1h)
+            s = stats(simulate_all(entries, dfmap))
+            if s:
+                log.info(f"  {str(v):>10} | {s['n']:>5} | {s['wr']:>5.1f} | {s['net']:>+7.1f} | {s['pf']:>5.2f}")
+                if best is None or s["pf"] > best[1]:
+                    best = (v, s["pf"])
+        cfg[param] = _orig
+        if best:
+            log.info("  " + "-" * 46)
+            log.info(f"  🏆 En iyi: {param} = {best[0]}  (PF {best[1]:.2f})")
+
+    log.info("\n  Not: LTF kapalı, sabit coin listesi — canlı birebir aynı olmayabilir.")
 
 
 if __name__ == "__main__":
