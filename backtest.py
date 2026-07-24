@@ -59,11 +59,13 @@ BT_USE_BTC  = True
 # (param,[değerler]) → tek tarama.
 # [ (p1,[..]), (p2,[..]) ] → LİSTE: girişler bir kez toplanır, hepsi arka
 #   arkaya taranır (tek çalıştırmada çıkış optimizasyonunun tamamı).
-BT_SWEEP = [
-    ("partial_runner_rr", [1.5, 2.0, 2.5, 3.0]),   # koşucu hedefi (R:R)
-    ("partial_tp_enabled", [True, False]),          # kısmi-kâr yardım mı ediyor?
-    ("atr_sl_mult",        [1.0, 1.3, 1.6, 2.0]),   # SL genişliği
-]
+# Çıkış sweep'i bitti → yeni ayarlar (sl_mult=1.0, runner_rr=3.0) uygulandı.
+# Şimdi None: yeni config'in BİRLEŞİK PF'sini gör (kombinasyon doğrulaması).
+BT_SWEEP = None
+# Sıradaki tur (giriş/indikatör ablation) için örnekler:
+#   BT_SWEEP = ("min_conditions", [2, 3, 4]);       BT_SWEEP_ENTRY = True
+#   BT_SWEEP = ("macd_in_score", [True, False]);    BT_SWEEP_ENTRY = True
+#   BT_SWEEP = ("adx_max", [40, 44, 48, 100]);      BT_SWEEP_ENTRY = True
 # Giriş parametresi mi tarıyorsun? (min_conditions, adx_max, indikatör flag'i...)
 # True yaparsan her değer için girişler baştan hesaplanır (yavaş). Sadece TEK
 # (param,[değerler]) ile birlikte kullan (liste ile değil).

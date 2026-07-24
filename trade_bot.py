@@ -148,7 +148,7 @@ CONFIG = {
 
     # ── ATR & SL/TP (entry_tf) ──────────────────────────────
     "atr_period"          : 14,
-    "atr_sl_mult"         : 1.3,
+    "atr_sl_mult"         : 1.0,          # backtest: dar SL en iyi (PF 1.53 vs 1.3'te 1.42, monoton)
     "rr_ratio"            : 1.5,
     "min_sl_pct"          : 0.012,
     "max_sl_pct"          : 0.030,
@@ -165,7 +165,7 @@ CONFIG = {
     "partial_tp_enabled"  : True,
     "partial_tp_r"        : 1.0,          # kaçıncı R'de kısmi al (1R)
     "partial_tp_frac"     : 0.5,          # ne kadarını kapat (yarısı)
-    "partial_runner_rr"   : 1.5,          # kalan yarının hedefi 1.5R (3R çok uzaktı → daha sık ulaşılır)
+    "partial_runner_rr"   : 3.0,          # backtest: 3R en iyi (PF 1.53 vs 1.5R'de 1.42) — sezgi yanıldı, veri kazandı
 
     # ── Giriş eşiği ─────────────────────────────────────────
     "min_conditions"      : 3,    # 5 koşuldan en az 3'ü. Veri: score 2 → WR%29 -6.34, score 3+ → WR%74 +9.36.
