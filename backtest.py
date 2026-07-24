@@ -55,10 +55,18 @@ BT_WINDOW   = 320
 BT_USE_BTC  = True
 
 # ── SWEEP (tarama) ─────────────────────────────────────────────
-# None → sadece baseline. Veya (param_adı, [değerler]) → tarama.
-BT_SWEEP = ("partial_runner_rr", [1.5, 2.0, 2.5, 3.0])
+# None → sadece baseline.
+# (param,[değerler]) → tek tarama.
+# [ (p1,[..]), (p2,[..]) ] → LİSTE: girişler bir kez toplanır, hepsi arka
+#   arkaya taranır (tek çalıştırmada çıkış optimizasyonunun tamamı).
+BT_SWEEP = [
+    ("partial_runner_rr", [1.5, 2.0, 2.5, 3.0]),   # koşucu hedefi (R:R)
+    ("partial_tp_enabled", [True, False]),          # kısmi-kâr yardım mı ediyor?
+    ("atr_sl_mult",        [1.0, 1.3, 1.6, 2.0]),   # SL genişliği
+]
 # Giriş parametresi mi tarıyorsun? (min_conditions, adx_max, indikatör flag'i...)
-# True yaparsan her değer için girişler baştan hesaplanır (yavaş).
+# True yaparsan her değer için girişler baştan hesaplanır (yavaş). Sadece TEK
+# (param,[değerler]) ile birlikte kullan (liste ile değil).
 BT_SWEEP_ENTRY = False
 
 # ─────────────────────────────────────────────────────────────
@@ -310,47 +318,38 @@ def main():
         else: log.info("⚠️  Hiç işlem yok.")
         return
 
-    param, values = BT_SWEEP
-    log.info(f"\n🔬 SWEEP: '{param}' → {values}   (giriş-tekrar={'AÇIK' if BT_SWEEP_ENTRY else 'kapalı'})\n")
+    # Tek sweep de olsa listeye çevir → aynı kodla işle
+    sweeps = BT_SWEEP if isinstance(BT_SWEEP, list) else [BT_SWEEP]
 
-    if not BT_SWEEP_ENTRY:
-        # Girişleri BİR KEZ topla, çıkış paramını hızlıca tara
-        entries = gather_all_entries(meta, btc1h)
+    def run_sweep(entries, param, values):
         _orig = cfg.get(param)
-        log.info(f"\n  {'değer':>10} | {'işlem':>5} | {'WR%':>5} | {'net%':>7} | {'ort+':>6} | {'ort-':>7} | {'PF':>5}")
+        log.info(f"\n🔬 SWEEP: '{param}'")
+        log.info(f"  {'değer':>10} | {'işlem':>5} | {'WR%':>5} | {'net%':>7} | {'ort+':>6} | {'ort-':>7} | {'PF':>5}")
         log.info("  " + "-" * 62)
         best = None
         for v in values:
             cfg[param] = v
+            if BT_SWEEP_ENTRY:                     # giriş paramı → baştan hesapla
+                entries = gather_all_entries(meta, btc1h)
             s = stats(simulate_all(entries, dfmap))
             if s:
                 log.info(f"  {str(v):>10} | {s['n']:>5} | {s['wr']:>5.1f} | {s['net']:>+7.1f} | {s['avg_w']:>+6.1f} | {s['avg_l']:>+7.1f} | {s['pf']:>5.2f}")
                 if best is None or s["pf"] > best[1]:
                     best = (v, s["pf"])
-        cfg[param] = _orig
+        cfg[param] = _orig                          # değeri eski haline getir (bağımsız sweep)
         if best:
             log.info("  " + "-" * 62)
             log.info(f"  🏆 En iyi: {param} = {best[0]}  (PF {best[1]:.2f})")
-    else:
-        # Giriş parametresi → her değer için baştan hesapla (yavaş)
-        _orig = cfg.get(param)
-        log.info(f"\n  {'değer':>10} | {'işlem':>5} | {'WR%':>5} | {'net%':>7} | {'PF':>5}")
-        log.info("  " + "-" * 46)
-        best = None
-        for v in values:
-            cfg[param] = v
-            entries = gather_all_entries(meta, btc1h)
-            s = stats(simulate_all(entries, dfmap))
-            if s:
-                log.info(f"  {str(v):>10} | {s['n']:>5} | {s['wr']:>5.1f} | {s['net']:>+7.1f} | {s['pf']:>5.2f}")
-                if best is None or s["pf"] > best[1]:
-                    best = (v, s["pf"])
-        cfg[param] = _orig
-        if best:
-            log.info("  " + "-" * 46)
-            log.info(f"  🏆 En iyi: {param} = {best[0]}  (PF {best[1]:.2f})")
 
-    log.info("\n  Not: LTF kapalı, sabit coin listesi — canlı birebir aynı olmayabilir.")
+    log.info(f"\n🔬 SWEEP MODU  ({len(sweeps)} parametre, giriş-tekrar={'AÇIK' if BT_SWEEP_ENTRY else 'kapalı'})")
+    entries = gather_all_entries(meta, btc1h)        # girişleri BİR KEZ topla
+    if not entries:
+        log.info("⚠️  Hiç sinyal yok."); return
+    for param, values in sweeps:
+        run_sweep(entries, param, values)
+
+    log.info("\n  Not: her sweep BAĞIMSIZ (diğer paramlar baseline'da). LTF kapalı,")
+    log.info("       sabit coin listesi — canlı birebir aynı olmayabilir.")
 
 
 if __name__ == "__main__":
