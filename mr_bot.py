@@ -31,8 +31,8 @@ FROZEN = dict(rsi_buy=3, rsi_sell=97, rsi_exit_l=65, rsi_exit_s=35,
               ema=200, bb_len=20, bb_mult=2.0, atr_stop=3.0, max_hold_h=24)
 LEV            = 5
 TRADE_USDT     = 10          # kağıt pozisyon büyüklüğü (marj)
-MAX_POSITIONS  = 5
-TOP_N          = 40          # taranacak en volatil coin sayısı
+MAX_POSITIONS  = 8           # daha çok eşzamanlı poz = daha çok çeşitlendirme = düşük varyans
+TOP_N          = 80          # daha çok coin = daha çok işlem, AYNI edge (eşiği gevşetmeden)
 LOOP_SEC       = 60          # 1 dk — strateji 1h mumlu, bundan hızlısı fayda vermez (rate-limit + repaint riski)
 REFRESH_SEC    = 900         # coin listesini 15 dk'da bir yenile
 MIN_HIST       = 260
