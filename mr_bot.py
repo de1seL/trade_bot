@@ -7,8 +7,8 @@ CANLI FİYATLARLA, GERÇEK EMİR AÇMADAN (dry-run) ileriye dönük test etmek.
 Sinyalleri ve kağıt-üstü sonuçları Telegram'a yollar + mr_trades.csv'ye yazar.
 
 Donmuş strateji (OOS doğrulandı — DEĞİŞTİRME):
-  LONG : close>EMA200(1h)  VE  RSI(2)<3  VE  close < Bollinger alt-band
-  SHORT: close<EMA200(1h)  VE  RSI(2)>97 VE  close > Bollinger üst-band
+  LONG : close>EMA200(1h)  VE  RSI(2)<5  VE  close < Bollinger alt-band
+  SHORT: close<EMA200(1h)  VE  RSI(2)>95 VE  close > Bollinger üst-band
   ÇIKIŞ: RSI(2)>65 (long) / <35 (short)  |  felaket-stop: 3.0×ATR  |  max 24s
   Kaldıraç 5x (kağıt), pozisyon başı sabit trade_usdt (kağıt).
 
@@ -27,7 +27,10 @@ log = tb.log
 tb.CONFIG["dry_run"] = True                 # gerçek emir YOK, private çağrı YOK
 
 # ── Ayarlar ──
-FROZEN = dict(rsi_buy=3, rsi_sell=97, rsi_exit_l=65, rsi_exit_s=35,
+# RSI<5: OOS'ta volatil evrende RSI<3'ten DAHA İYİ (PF 1.39 vs 1.26, %33 daha çok
+# işlem, aynı WR). Sadece volatilde geçerli (likitte çöküyor); mr_bot zaten volatil
+# tarıyor. rsi_sell = 100 - rsi_buy = 95.
+FROZEN = dict(rsi_buy=5, rsi_sell=95, rsi_exit_l=65, rsi_exit_s=35,
               ema=200, bb_len=20, bb_mult=2.0, atr_stop=3.0, max_hold_h=24)
 LEV            = 5
 TRADE_USDT     = 10          # kağıt pozisyon büyüklüğü (marj)
@@ -129,7 +132,7 @@ def main():
     log.info(f"   max {MAX_POSITIONS} poz, {TRADE_USDT}$/poz (kağıt), tarama {TOP_N} coin")
     notify_ok = tb.CONFIG.get("notify_telegram") and tb.TELEGRAM_TOKEN and tb.TELEGRAM_CHAT_ID
     tb.notify("🟣 <b>Mean-Reversion DRY-RUN başladı</b>\n"
-              "RSI(2)&lt;3 + Bollinger + 200EMA | 5x kağıt | gerçek emir YOK\n"
+              "RSI(2)&lt;5 + Bollinger + 200EMA | 5x kağıt | gerçek emir YOK\n"
               "Sinyaller ve kağıt sonuçlar buraya düşecek.")
     if not notify_ok:
         log.warning("⚠️  Telegram kapalı/token yok — mesajlar sadece log'a. (.env: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)")
