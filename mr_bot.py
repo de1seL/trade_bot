@@ -25,6 +25,10 @@ import trade_bot as tb
 
 log = tb.log
 tb.CONFIG["dry_run"] = True                 # gerçek emir YOK, private çağrı YOK
+# Coin havuzunu genişlet: get_symbols "24s'te ≥%3 oynayan" filtresini kullanıyor →
+# sakin günde ~40 coin geçiyor. 3.0→1.5 ile daha çok coin havuza girer (~70-80).
+# Hacim ≥$10M filtresi DURUYOR (likidite mean-reversion için önemli).
+tb.CONFIG["min_volatility_pct"] = 1.5
 
 # ── Ayarlar ──
 # RSI<5: OOS'ta volatil evrende RSI<3'ten DAHA İYİ (PF 1.39 vs 1.26, %33 daha çok
