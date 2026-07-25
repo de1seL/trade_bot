@@ -1,20 +1,22 @@
 """
-ADAY STRATEJİ backtest'i — mevcut 5-koşullu skoru şu üçlüyle değiştirir:
-    Squeeze Momentum (LazyBear TTM) + VWAP (günlük-çapa) + StochRSI K/D crossover
+ADAY STRATEJİ backtest'i — 6 KOŞULLU skor:
+    [ stoch, rsi, vol, st ]  (mevcut skordan KORUNAN 4 koşul)
+  + [ Squeeze Momentum ]     (macd YERİNE)
+  + [ VWAP günlük-çapa ]     (yeni 6. koşul)
 
-Amaç: canlıya DOKUNMADAN, mevcut baseline (PF ~1.40) ile A/B karşılaştırmak.
-  • AYNI coinler, AYNI yüksek-TF gate'ler (4h yön+ADX, 1d rejim, adx_max),
-    AYNI çıkış simülasyonu (backtest.simulate_position) → tek değişen: GİRİŞ skoru.
-  • Bu sayede fark tamamen "giriş kalitesi" farkıdır, elmayla elma.
+Mevcut canlı skor 5 koşul: [stoch, rsi, macd, vol, st]  (EMA skorda değil, kapı).
+Bu aday: macd → Squeeze değişir, VWAP eklenir → toplam 6 koşul. min 4 artık anlamlı.
 
-Rapor:
-  • Aday: min 2/3 ve min 3/3 için ayrı PF (3 indikatör olduğu için maks skor 3'tür;
-    "min skor 4" matematiksel olarak imkansız — o yüzden 3/3 en katısı).
-  • İki-yarı robustluk: her coinin ilk yarısı vs ikinci yarısı ayrı PF
-    (bir yarıda kâr diğerinde zarar = overfit, güvenme).
+A/B: canlıya DOKUNMADAN baseline (PF ~1.40) ile karşılaştırır.
+  AYNI coinler, AYNI yüksek-TF gate'ler (4h yön+ADX, 1d rejim, adx_max),
+  AYNI çıkış simülasyonu → tek değişen: skorun 2 koşulu.
+  4 orijinal koşul (stoch/rsi/vol/st) doğrudan tb.calc_entry'den okunur → birebir aynı.
 
-Çalıştırma:  python bt_candidate.py     (Binance erişimi olan makinede)
-API anahtarı GEREKMEZ, emir YOK, sadece geçmiş veri okur.
+Rapor: min 3 / min 4 / min 5 için ayrı PF + iki-yarı robustluk.
+Tetik: Squeeze==yön VEYA stoch==yön (macd yerine squeeze).
+
+Çalıştırma:  python bt_candidate.py   (Binance erişimi olan makinede)
+API anahtarı GEREKMEZ, emir YOK.
 """
 import numpy as np
 import pandas as pd
@@ -24,101 +26,56 @@ import trade_bot as tb
 cfg = tb.CONFIG
 log = tb.log
 
-# ── Aday indikatör parametreleri ──
-SQZ_LEN   = 20      # BB & KC & momentum penceresi
-SQZ_MULT  = 1.5     # Keltner çarpanı (kullanılmıyor ama referans)
-STOCH_CROSS_LOOKBACK = 3   # son N mumda K, D'yi kesmiş mi (taze crossover)
+SQZ_LEN = 20
+STOCH_CROSS_LOOKBACK = 3   # (bu adayda stoch skoru tb.calc_entry'den; cross ayrı kullanılmıyor)
 
 
-# ─────────────────────────────────────────────────────────────
-# ADAY GİRİŞ İNDİKATÖRLERİ (kendi içinde, trade_bot.calc_entry'den bağımsız)
-# ─────────────────────────────────────────────────────────────
-
+# ── Yeni 2 indikatör (kendi içinde) ─────────────────────────────
 def _linreg_endpoint(series: pd.Series, window: int) -> pd.Series:
-    """Her nokta için son `window` mumun lineer regresyon UÇ değeri (LazyBear val)."""
-    x = np.arange(window)
-    xm = x.mean()
-    denom = ((x - xm) ** 2).sum()
+    x = np.arange(window); xm = x.mean(); denom = ((x - xm) ** 2).sum()
     def f(y):
-        ym = y.mean()
-        slope = ((x - xm) * (y - ym)).sum() / denom
-        intercept = ym - slope * xm
-        return intercept + slope * (window - 1)   # son bar
+        ym = y.mean(); slope = ((x - xm) * (y - ym)).sum() / denom
+        return (ym - slope * xm) + slope * (window - 1)
     return series.rolling(window).apply(f, raw=True)
 
 
-def squeeze_momentum_dir(df: pd.DataFrame) -> str:
-    """LazyBear Squeeze Momentum histogram yönü (son bar)."""
+def squeeze_dir(df: pd.DataFrame) -> str:
     c = df["close"]
     highest = df["high"].rolling(SQZ_LEN).max()
     lowest  = df["low"].rolling(SQZ_LEN).min()
-    sma_c   = c.rolling(SQZ_LEN).mean()
-    m1      = ((highest + lowest) / 2 + sma_c) / 2
-    val     = _linreg_endpoint(c - m1, SQZ_LEN)
-    v = val.iloc[-1]
-    if pd.isna(v):
-        return "NONE"
+    m1 = ((highest + lowest) / 2 + c.rolling(SQZ_LEN).mean()) / 2
+    v = _linreg_endpoint(c - m1, SQZ_LEN).iloc[-1]
+    if pd.isna(v): return "NONE"
     return "LONG" if v > 0 else "SHORT" if v < 0 else "NONE"
 
 
 def vwap_dir(df: pd.DataFrame) -> str:
-    """Günlük-çapa VWAP'a göre yön (fiyat üstünde=LONG)."""
     tp = (df["high"] + df["low"] + df["close"]) / 3
     day = df.index.normalize()
-    pv = (tp * df["volume"]).groupby(day).cumsum()
-    vv = df["volume"].groupby(day).cumsum()
-    vwap = pv / vv.replace(0, np.nan)
-    if pd.isna(vwap.iloc[-1]):
-        return "NONE"
-    price = float(df["close"].iloc[-1])
-    return "LONG" if price > float(vwap.iloc[-1]) else "SHORT"
+    vwap = (tp * df["volume"]).groupby(day).cumsum() / df["volume"].groupby(day).cumsum().replace(0, np.nan)
+    if pd.isna(vwap.iloc[-1]): return "NONE"
+    return "LONG" if float(df["close"].iloc[-1]) > float(vwap.iloc[-1]) else "SHORT"
 
 
-def stochrsi_cross_dir(df: pd.DataFrame) -> str:
-    """StochRSI K/D crossover yönü — K>D ve son N mumda taze kesişim olmuş."""
-    st = tb.ta.momentum.StochRSIIndicator(
-        df["close"], window=cfg["stoch_period"],
-        smooth1=cfg["stoch_smooth_k"], smooth2=cfg["stoch_smooth_d"])
-    k = (st.stochrsi_k() * 100).dropna()
-    d = (st.stochrsi_d() * 100).dropna()
-    if len(k) < STOCH_CROSS_LOOKBACK + 2:
-        return "NONE"
-    kl, dl = float(k.iloc[-1]), float(d.iloc[-1])
-    # taze crossover: son N mumda ters durumdan mevcut duruma geçmiş mi
-    up = dn = False
-    for i in range(1, STOCH_CROSS_LOOKBACK + 1):
-        if k.iloc[-i] > d.iloc[-i] and k.iloc[-i-1] <= d.iloc[-i-1]:
-            up = True
-        if k.iloc[-i] < d.iloc[-i] and k.iloc[-i-1] >= d.iloc[-i-1]:
-            dn = True
-    if kl > dl and up:
-        return "LONG"
-    if kl < dl and dn:
-        return "SHORT"
-    # taze kesişim yoksa: sadece durum (post-crossover) — daha çok sinyal için
-    return "LONG" if kl > dl else "SHORT"
-
-
-def candidate_score(df1h: pd.DataFrame, direction: str):
-    """4h yönüne (direction) uyan indikatör sayısını döndürür (0..3) + atr."""
-    sq = squeeze_momentum_dir(df1h)
+# ── 6-koşullu skor: 4 orijinal (calc_entry) + squeeze + vwap ──
+def candidate_score(entry: dict, df1h: pd.DataFrame, d: str):
+    sq = squeeze_dir(df1h)
     vw = vwap_dir(df1h)
-    sr = stochrsi_cross_dir(df1h)
-    dirs = [sq, vw, sr]
-    score = sum(1 for x in dirs if x == direction)
-    return score, {"squeeze": sq, "vwap": vw, "stoch": sr}
+    if d == "LONG":
+        conds = [entry["stoch_long"], entry["rsi_long"], entry["vol_ok"],
+                 entry["st_long"], sq == "LONG", vw == "LONG"]
+        trigger = (sq == "LONG") or entry["stoch_long"]
+    else:
+        conds = [entry["stoch_short"], entry["rsi_short"], entry["vol_ok"],
+                 entry["st_short"], sq == "SHORT", vw == "SHORT"]
+        trigger = (sq == "SHORT") or entry["stoch_short"]
+    return sum(bool(x) for x in conds), trigger
 
-
-# ─────────────────────────────────────────────────────────────
-# GİRİŞ TOPLAMA — baseline'ın gate'lerini korur, skoru üçlüyle değiştirir
-# ─────────────────────────────────────────────────────────────
 
 def collect_candidate(sym, df1h, df4h, df1d, btc1h):
     entries = []
-    n = len(df1h)
-    j_free = 0
+    n = len(df1h); j_free = 0
     cache = {"n4": -1, "n1d": -1, "trend": None, "daily": None}
-    # ATR'yi baseline ile aynı şekilde calc_entry'den al (çıkış SL'i aynı olsun)
     for i in range(bt.BT_WARMUP, n - 1):
         if i < j_free:
             continue
@@ -139,31 +96,29 @@ def collect_candidate(sym, df1h, df4h, df1d, btc1h):
         if trend is None:
             continue
         d = trend["direction"]
-        # ── AYNI RİSK GATE'LERİ (baseline get_signal ile birebir) ──
+        # AYNI risk gate'leri (baseline get_signal ile birebir)
         if d == "NONE" or not trend["adx_ok"]:
             continue
         if cfg.get("adx_max") and trend["adx"] >= cfg["adx_max"]:
             continue
         if daily != "NONE" and daily != d:
             continue
-
         d1 = df1h.iloc[max(0, i - bt.BT_WINDOW): i + 1]
         if len(d1) < max(SQZ_LEN, cfg["stoch_period"]) + 5:
             continue
-        # ATR (baseline calc_entry ile aynı hesap) → çıkış SL tutarlı olsun
         try:
-            ent = tb.calc_entry(d1.copy())
-            if ent is None:
+            entry = tb.calc_entry(d1.copy())
+            if entry is None:
                 continue
-            atr = ent["atr"]
         except Exception:
             continue
-
-        score, parts = candidate_score(d1.copy(), d)
-        if score >= 2:   # min 2/3 topla; raporda 3/3 ayrıca süzülür
+        score, trigger = candidate_score(entry, d1.copy(), d)
+        if not trigger:                # tetik yoksa girme (baseline mantığı)
+            continue
+        if score >= 3:                 # min 3 topla; raporda 4/5 süzülür
             price = float(d1["close"].iloc[-1])
             entries.append({"sym": sym.split("/")[0], "i": i, "side": d,
-                            "price": price, "atr": atr, "score": score,
+                            "price": price, "atr": entry["atr"], "score": score,
                             "half": 0 if i < n // 2 else 1})
             j_free = i + max(1, int(cfg["max_pos_hours"])) + 1
     return entries
@@ -175,14 +130,13 @@ def sim(entries, dfmap):
         res = bt.simulate_position(dfmap[e["sym"]], e["i"], e["side"], e["price"], e["atr"])
         if res is None:
             continue
-        net, reason, bars = res
+        net, reason, _ = res
         out.append({**e, "net": net, "reason": reason})
     return out
 
 
 def pf(trades):
-    if not trades:
-        return None
+    if not trades: return None
     n = len(trades)
     w = [t["net"] for t in trades if t["net"] > 0]
     l = [t["net"] for t in trades if t["net"] <= 0]
@@ -201,27 +155,27 @@ def line(label, trades):
 
 
 def main():
-    log.info("📊 ADAY STRATEJİ backtest'i — Squeeze + VWAP + StochRSI-cross")
+    log.info("📊 ADAY (6-koşul): stoch+rsi+vol+st + Squeeze + VWAP")
     ex = bt.connect()
     dfmap, meta, btc1h = bt.load_data(ex)
     all_e = []
     for sym, (df1h, df4h, df1d) in meta.items():
         e = collect_candidate(sym, df1h, df4h, df1d, btc1h)
-        log.info(f"   [{sym.split('/')[0]:8}] {len(e)} sinyal (min 2/3)")
+        log.info(f"   [{sym.split('/')[0]:8}] {len(e)} sinyal (min 3)")
         all_e.extend(e)
     trades = sim(all_e, dfmap)
     log.info("\n" + "═" * 74)
-    log.info(f"  ADAY: Squeeze+VWAP+StochRSI  ({len(bt.BT_SYMBOLS)} coin, {bt.BT_1H_LIMIT} saat)")
-    log.info(f"  (karşılaştırma hedefi: mevcut baseline PF ~1.40)")
+    log.info(f"  ADAY 6-koşul  ({len(bt.BT_SYMBOLS)} coin, {bt.BT_1H_LIMIT} saat)  hedef: baseline PF ~1.40")
     log.info("═" * 74)
-    line("min 2/3 (HEPSİ)", trades)
-    line("min 3/3 (katı)",  [t for t in trades if t["score"] >= 3])
-    log.info("  ── İki-yarı robustluk (min 2/3) ──")
-    line("1. yarı", [t for t in trades if t["half"] == 0])
-    line("2. yarı", [t for t in trades if t["half"] == 1])
+    line("min 3", trades)
+    line("min 4  ← senin öneri", [t for t in trades if t["score"] >= 4])
+    line("min 5", [t for t in trades if t["score"] >= 5])
+    log.info("  ── İki-yarı robustluk (min 4) ──")
+    line("1. yarı", [t for t in trades if t["half"] == 0 and t["score"] >= 4])
+    line("2. yarı", [t for t in trades if t["half"] == 1 and t["score"] >= 4])
     log.info("═" * 74)
-    log.info("  Yorum: min 2/3 VE min 3/3 ikisi de baseline 1.40'ı NET geçmiyorsa,")
-    log.info("         VE iki yarı tutarlı değilse → aday daha iyi DEĞİL, değiştirme.")
+    log.info("  Karar: min 4 PF baseline 1.40'ı NET geçiyor (≥1.55) VE iki yarı da")
+    log.info("         tutuyorsa → aday iyi. Değilse mevcut 5-koşullu kalsın.")
 
 
 if __name__ == "__main__":
