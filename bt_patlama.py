@@ -213,15 +213,20 @@ def main():
     log.info("\n" + "═" * 60)
     log.info("  🎯 SONUÇ  (karşılaştırma: mevcut strateji PF ~1.40)")
     log.info("═" * 60)
-    if sM: log.info(f"  MAJÖRLER : PF={sM['pf']:.2f}  WR=%{sM['wr']:.1f}  net={sM['net']:+.1f}%  ({sM['n']})")
-    if sV: log.info(f"  VOLATİL  : PF={sV['pf']:.2f}  WR=%{sV['wr']:.1f}  net={sV['net']:+.1f}%  ({sV['n']})")
-    best = max([s['pf'] for s in (sM, sV) if s], default=0)
-    if best >= 1.55:
-        log.info("  ✅ Baseline 1.40'ı NET geçiyor — ciddiye al, robustluk testi yap.")
-    elif best >= 1.30:
-        log.info("  ⚪ Baseline civarı — net üstünlük yok, değiştirmeye değmez.")
+    if sM: log.info(f"  MAJÖRLER (yansız) : PF={sM['pf']:.2f}  WR=%{sM['wr']:.1f}  net={sM['net']:+.1f}%  ({sM['n']})")
+    if sV: log.info(f"  VOLATİL (yanlı)   : PF={sV['pf']:.2f}  WR=%{sV['wr']:.1f}  net={sV['net']:+.1f}%  ({sV['n']})")
+    log.info("")
+    log.info("  ⚠️  DÜRÜST OKUMA: volatil kova 'bugün volatil' coinlerin geçmişini")
+    log.info("     test eder → ileriye-bakış yanlılığı + birkaç mega-trende yaslanır.")
+    log.info("     GÜVENİLİR kova MAJÖRLER'dir. Karar ona göre verilir:")
+    # Yanlı volatil kovanın PF'sini KARARDA kullanma — majörler yansız referans.
+    ref = sM['pf'] if sM else 0
+    if ref >= 1.55:
+        log.info(f"  ✅ Majörlerde PF {ref:.2f} — baseline 1.40'ı geçiyor, robustluk testi yap.")
+    elif ref >= 1.30:
+        log.info(f"  ⚪ Majörlerde PF {ref:.2f} — baseline civarı, net üstünlük yok.")
     else:
-        log.info("  ❌ Baseline'ın ALTINDA — saf 3'lü daha kötü, mevcut kalsın.")
+        log.info(f"  ❌ Majörlerde PF {ref:.2f} — baseline'ın ALTINDA, saf 3'lü daha kötü. Mevcut kalsın.")
     log.info("═" * 60)
 
 
