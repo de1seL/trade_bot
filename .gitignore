@@ -11,3 +11,5 @@ venv/
 # Bot çıktıları
 *.log
 trades*.csv
+mr_trades.csv
+mr_positions.json
