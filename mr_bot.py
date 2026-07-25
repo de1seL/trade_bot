@@ -85,26 +85,28 @@ def indicators(df):
     ema  = tb.ta.trend.EMAIndicator(c, FROZEN["ema"]).ema_indicator()
     atr  = tb.ta.volatility.AverageTrueRange(df["high"], df["low"], c, 14).average_true_range()
     bb   = tb.ta.volatility.BollingerBands(c, FROZEN["bb_len"], FROZEN["bb_mult"])
-    return rsi2, ema, atr, bb.bollinger_lband(), bb.bollinger_hband()
+    return rsi2, ema, atr, bb.bollinger_lband(), bb.bollinger_hband(), bb.bollinger_mavg()
 
 
 def check_entry(df):
-    """Son kapalı mumda giriş sinyali? → (side, entry, sl) veya None."""
-    rsi2, ema, atr, lo_bb, up_bb = indicators(df)
+    """Son kapalı mumda giriş sinyali? → (side, entry, sl, hedef) veya None.
+    hedef = orta bant (20-ort) — gösterge; gerçek çıkış RSI toparlamasıyla (dinamik)."""
+    rsi2, ema, atr, lo_bb, up_bb, mid = indicators(df)
     i = len(df) - 1
     r = rsi2.iloc[i]; e = ema.iloc[i]; c = float(df["close"].iloc[i]); av = atr.iloc[i]
-    if any(np.isnan(x) for x in (r, e, av, lo_bb.iloc[i], up_bb.iloc[i])):
+    if any(np.isnan(x) for x in (r, e, av, lo_bb.iloc[i], up_bb.iloc[i], mid.iloc[i])):
         return None
+    tgt = float(mid.iloc[i])
     if c > e and r < FROZEN["rsi_buy"] and c < lo_bb.iloc[i]:
-        return "LONG", c, c - FROZEN["atr_stop"] * av
+        return "LONG", c, c - FROZEN["atr_stop"] * av, tgt
     if c < e and r > FROZEN["rsi_sell"] and c > up_bb.iloc[i]:
-        return "SHORT", c, c + FROZEN["atr_stop"] * av
+        return "SHORT", c, c + FROZEN["atr_stop"] * av, tgt
     return None
 
 
 def check_exit(df, p):
     """Açık pozisyon kapanmalı mı? → (reason, exit_price) veya None."""
-    rsi2, ema, atr, lo_bb, up_bb = indicators(df)
+    rsi2, ema, atr, lo_bb, up_bb, mid = indicators(df)
     i = len(df) - 1
     r = rsi2.iloc[i]
     hi = float(df["high"].iloc[i]); lo = float(df["low"].iloc[i]); c = float(df["close"].iloc[i])
@@ -198,15 +200,16 @@ def main():
                         continue
                     sig = check_entry(df)
                     if sig:
-                        side, entry, sl = sig
+                        side, entry, sl, tgt = sig
                         positions[sym] = {"side": side, "entry": entry, "sl": sl,
-                                          "opened": now_utc().isoformat()}
+                                          "target": tgt, "opened": now_utc().isoformat()}
                         save_state(positions)
                         arrow = "🟢 AL" if side == "LONG" else "🔴 SAT"
                         tb.notify(f"{arrow} <b>[DRY] {sym.split('/')[0]}</b>  {side}\n"
                                   f"giriş {entry:.6g}  •  stop {sl:.6g}\n"
+                                  f"≈hedef {tgt:.6g} (orta bant)  •  çıkış: RSI toparlayınca (dinamik)\n"
                                   f"sebep: RSI(2) aşırı {'dip' if side=='LONG' else 'tepe'} + Bollinger + trend")
-                        log.info(f"{arrow} [DRY] {sym} {side} giriş {entry:.6g} stop {sl:.6g}")
+                        log.info(f"{arrow} [DRY] {sym} {side} giriş {entry:.6g} stop {sl:.6g} ≈hedef {tgt:.6g}")
 
             open_c = len(positions)
             log.info(f"⏳ {LOOP_SEC}s bekleniyor... [açık kağıt poz: {open_c}/{MAX_POSITIONS}]")
