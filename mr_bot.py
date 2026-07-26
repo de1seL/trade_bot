@@ -42,6 +42,7 @@ MAX_POSITIONS  = 8           # daha çok eşzamanlı poz = daha çok çeşitlend
 TOP_N          = 80          # daha çok coin = daha çok işlem, AYNI edge (eşiği gevşetmeden)
 LOOP_SEC       = 60          # 1 dk — strateji 1h mumlu, bundan hızlısı fayda vermez (rate-limit + repaint riski)
 REFRESH_SEC    = 900         # coin listesini 15 dk'da bir yenile
+STATUS_SEC     = 3600         # Telegram'a periyodik özet (WR/PnL) — saatte bir
 MIN_HIST       = 260
 STATE_FILE     = "mr_positions.json"
 TRADES_CSV     = "mr_trades.csv"
@@ -77,6 +78,35 @@ def log_trade(row):
         if not exists:
             w.writeheader()
         w.writerow(row)
+
+
+def compute_stats():
+    """mr_trades.csv'den kümülatif özet: n, W/L, WR, PnL$, PF (restart'ta da doğru)."""
+    import csv
+    if not os.path.isfile(TRADES_CSV):
+        return None
+    n = w = 0; usd = 0.0; gw = gl = 0.0
+    try:
+        with open(TRADES_CSV, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                p = float(r["pnl_usdt"])
+                n += 1; usd += p
+                if p > 0: w += 1; gw += p
+                else: gl += -p
+    except Exception:
+        return None
+    if n == 0:
+        return None
+    return {"n": n, "w": w, "l": n - w, "wr": w / n * 100, "usd": usd,
+            "pf": (gw / gl if gl > 0 else 99)}
+
+
+def stats_line():
+    s = compute_stats()
+    if not s:
+        return "📊 Henüz kapanan işlem yok"
+    return (f"📊 Toplam {s['n']} işlem: {s['w']}W/{s['l']}L (%{s['wr']:.0f} WR)  •  "
+            f"PnL {s['usd']:+.2f}$ kağıt  •  PF {s['pf']:.2f}")
 
 
 def indicators(df):
@@ -147,6 +177,7 @@ def main():
     positions = load_state()
     symbols = []
     last_refresh = 0.0
+    last_status = time.time()
 
     while True:
         try:
@@ -173,9 +204,6 @@ def main():
                     usdt = TRADE_USDT * pct / 100
                     dur = (now_utc() - datetime.fromisoformat(p["opened"])).total_seconds() / 60
                     emoji = "✅" if pct > 0 else "❌"
-                    tb.notify(f"{emoji} <b>[DRY] {sym.split('/')[0]} KAPAT</b>  {p['side']}\n"
-                              f"giriş {p['entry']:.6g} → çıkış {exit_px:.6g}\n"
-                              f"PnL: <b>{pct:+.2f}%</b> ({usdt:+.2f}$ kağıt)  •  {reason}  •  {dur:.0f}dk")
                     log.info(f"{emoji} [DRY] {sym} {p['side']} KAPAT {pct:+.2f}% ({reason})")
                     log_trade({"time": now_utc().strftime("%Y-%m-%d %H:%M:%S"),
                                "symbol": sym.split("/")[0], "side": p["side"],
@@ -184,6 +212,10 @@ def main():
                                "reason": reason, "dur_min": round(dur)})
                     del positions[sym]
                     save_state(positions)
+                    tb.notify(f"{emoji} <b>[DRY] {sym.split('/')[0]} KAPAT</b>  {p['side']}\n"
+                              f"giriş {p['entry']:.6g} → çıkış {exit_px:.6g}\n"
+                              f"PnL: <b>{pct:+.2f}%</b> ({usdt:+.2f}$ kağıt)  •  {reason}  •  {dur:.0f}dk\n"
+                              f"{stats_line()}")
 
             # 2) yeni giriş ara (boş slot varsa)
             if len(positions) < MAX_POSITIONS:
@@ -212,7 +244,11 @@ def main():
                         log.info(f"{arrow} [DRY] {sym} {side} giriş {entry:.6g} stop {sl:.6g} ≈hedef {tgt:.6g}")
 
             open_c = len(positions)
-            log.info(f"⏳ {LOOP_SEC}s bekleniyor... [açık kağıt poz: {open_c}/{MAX_POSITIONS}]")
+            log.info(f"⏳ {LOOP_SEC}s bekleniyor... [açık: {open_c}/{MAX_POSITIONS}]  {stats_line()}")
+            # saatte bir Telegram özeti (throttle)
+            if time.time() - last_status > STATUS_SEC:
+                tb.notify(f"🟣 <b>Durum</b> — açık kağıt poz: {open_c}/{MAX_POSITIONS}\n{stats_line()}")
+                last_status = time.time()
             time.sleep(LOOP_SEC)
 
         except KeyboardInterrupt:
