@@ -13,3 +13,4 @@ venv/
 trades*.csv
 mr_trades.csv
 mr_positions.json
+mr_bot.lock

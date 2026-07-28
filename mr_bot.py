@@ -46,7 +46,26 @@ STATUS_SEC     = 3600         # Telegram'a periyodik özet (WR/PnL) — saatte b
 MIN_HIST       = 260
 STATE_FILE     = "mr_positions.json"
 TRADES_CSV     = "mr_trades.csv"
+LOCK_FILE      = "mr_bot.lock"
 COST_FR        = tb.CONFIG["commission"] + tb.CONFIG["slippage"]
+
+
+def _lock_alive():
+    """Başka bir mr_bot canlı mı? (lock dosyası son 3 döngüde güncellenmişse evet)"""
+    if not os.path.isfile(LOCK_FILE):
+        return False
+    try:
+        return (time.time() - os.path.getmtime(LOCK_FILE)) < LOOP_SEC * 3
+    except Exception:
+        return False
+
+
+def _touch_lock():
+    try:
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
 
 
 def now_utc():
@@ -164,7 +183,13 @@ def pnl_pct(side, entry, exit_px):
 
 
 def main():
-    log.info("🟣 MEAN-REVERSION DRY-RUN başlıyor (RSI<3+BB+200EMA, 5x kağıt)")
+    if _lock_alive():
+        log.error("⛔ Başka bir mr_bot ZATEN çalışıyor (mr_bot.lock taze). "
+                  "İki kopya aynı anda çalıştırma — istatistiği bozar, riski 2'ye katlar.")
+        log.error("   Gerçekten tek kopya kaldıysa mr_bot.lock dosyasını sil ve tekrar başlat.")
+        return
+    _touch_lock()
+    log.info("🟣 MEAN-REVERSION DRY-RUN başlıyor (RSI<5+BB+200EMA, 5x kağıt)")
     log.info(f"   max {MAX_POSITIONS} poz, {TRADE_USDT}$/poz (kağıt), tarama {TOP_N} coin")
     notify_ok = tb.CONFIG.get("notify_telegram") and tb.TELEGRAM_TOKEN and tb.TELEGRAM_CHAT_ID
     tb.notify("🟣 <b>Mean-Reversion DRY-RUN başladı</b>\n"
@@ -243,6 +268,7 @@ def main():
                                   f"sebep: RSI(2) aşırı {'dip' if side=='LONG' else 'tepe'} + Bollinger + trend")
                         log.info(f"{arrow} [DRY] {sym} {side} giriş {entry:.6g} stop {sl:.6g} ≈hedef {tgt:.6g}")
 
+            _touch_lock()                         # canlıyım heartbeat (ikinci kopyayı engeller)
             open_c = len(positions)
             log.info(f"⏳ {LOOP_SEC}s bekleniyor... [açık: {open_c}/{MAX_POSITIONS}]  {stats_line()}")
             # saatte bir Telegram özeti (throttle)
@@ -254,6 +280,8 @@ def main():
         except KeyboardInterrupt:
             log.info("👋 Dry-run kullanıcı tarafından durduruldu.")
             tb.notify("🟣 Mean-Reversion DRY-RUN durduruldu.")
+            try: os.remove(LOCK_FILE)
+            except Exception: pass
             break
         except Exception as e:
             log.exception(f"💥 Döngü hatası: {e}")
