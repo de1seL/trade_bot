@@ -13,6 +13,7 @@ import { FuturesPosition, FuturesSide } from '../types';
 import { colors, spacing, radius } from '../theme';
 import { CoinOption } from '../prices/coins';
 import { CoinSearch } from '../components/CoinSearch';
+import { NumberInput } from '../components/NumberInput';
 
 const LEVERAGES = [1, 2, 3, 5, 10, 20, 25, 50, 75, 100];
 
@@ -122,13 +123,11 @@ export function AddFuturesScreen({
         </View>
 
         <Text style={styles.fieldLabel}>Giriş Fiyatı (USDT)</Text>
-        <TextInput
+        <NumberInput
           style={styles.input}
           placeholder="0"
-          placeholderTextColor={colors.textDim}
           value={entryPrice}
           onChangeText={setEntryPrice}
-          keyboardType="decimal-pad"
         />
 
         <Text style={styles.fieldLabel}>Kaldıraç</Text>
@@ -147,13 +146,11 @@ export function AddFuturesScreen({
         </View>
 
         <Text style={styles.fieldLabel}>Teminat (USDT)</Text>
-        <TextInput
+        <NumberInput
           style={styles.input}
           placeholder="0"
-          placeholderTextColor={colors.textDim}
           value={margin}
           onChangeText={setMargin}
-          keyboardType="decimal-pad"
         />
         {notional > 0 && (
           <Text style={styles.hint}>

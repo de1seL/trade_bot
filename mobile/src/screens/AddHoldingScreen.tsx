@@ -17,6 +17,7 @@ import { StockSearch } from '../components/StockSearch';
 import { StockRef } from '../prices/stocks';
 import { FundSearch } from '../components/FundSearch';
 import { FX_CURRENCIES } from '../prices/fx';
+import { NumberInput } from '../components/NumberInput';
 
 const TYPES: AssetType[] = ['crypto', 'stock', 'gold', 'fx', 'fund', 'cash'];
 const CURRENCIES: { value: BuyCurrency; label: string }[] = [
@@ -283,25 +284,21 @@ export function AddHoldingScreen({
         )}
 
         <Text style={styles.fieldLabel}>Adet / Miktar</Text>
-        <TextInput
+        <NumberInput
           style={styles.input}
           placeholder="0"
-          placeholderTextColor={colors.textDim}
           value={quantity}
           onChangeText={setQuantity}
-          keyboardType="decimal-pad"
         />
 
         <Text style={styles.fieldLabel}>
           Birim Alış Fiyatı ({curSymbol(priceCurrency)})
         </Text>
-        <TextInput
+        <NumberInput
           style={styles.input}
           placeholder="0"
-          placeholderTextColor={colors.textDim}
           value={buyPrice}
           onChangeText={setBuyPrice}
-          keyboardType="decimal-pad"
         />
 
         {isCash && (
@@ -309,13 +306,11 @@ export function AddHoldingScreen({
             <Text style={styles.fieldLabel}>
               Güncel Birim Fiyat ({curSymbol(priceCurrency)})
             </Text>
-            <TextInput
+            <NumberInput
               style={styles.input}
               placeholder="Boş bırakılırsa alış fiyatı kullanılır"
-              placeholderTextColor={colors.textDim}
               value={manualPrice}
               onChangeText={setManualPrice}
-              keyboardType="decimal-pad"
             />
             <Text style={styles.hint}>
               Kripto dışı varlıkların fiyatı şimdilik elle güncellenir.
