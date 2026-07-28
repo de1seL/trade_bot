@@ -6,6 +6,7 @@ const SETTINGS_KEY = '@portfolio/settings';
 const FUTURES_KEY = '@portfolio/futures';
 
 export const DEFAULT_SETTINGS: Settings = {
+  name: '',
   // Türkiye için başlangıç değeri — kullanıcı Ayarlar'dan günceller.
   annualInflation: 45,
   // Varsayılan görüntü para birimi.

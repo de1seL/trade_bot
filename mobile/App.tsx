@@ -33,6 +33,7 @@ import { fetchFxRates } from './src/prices/fx';
 import { fetchFundPrices } from './src/prices/funds';
 import { buildSummary } from './src/utils/portfolio';
 import { buildFuturesSummary } from './src/utils/futures';
+import { HomeScreen } from './src/screens/HomeScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { FuturesScreen } from './src/screens/FuturesScreen';
 import { MarketScreen } from './src/screens/MarketScreen';
@@ -40,7 +41,7 @@ import { AddHoldingScreen } from './src/screens/AddHoldingScreen';
 import { AddFuturesScreen } from './src/screens/AddFuturesScreen';
 import { SettingsModal } from './src/screens/SettingsModal';
 
-type Tab = 'portfolio' | 'futures' | 'market';
+type Tab = 'home' | 'portfolio' | 'futures' | 'market';
 
 export default function App() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -54,7 +55,7 @@ export default function App() {
   const [usdTry, setUsdTry] = useState<number | null>(null);
   const [priceError, setPriceError] = useState<string | undefined>();
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<Tab>('portfolio');
+  const [tab, setTab] = useState<Tab>('home');
   const [showAdd, setShowAdd] = useState(false);
   const [showAddFutures, setShowAddFutures] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -253,6 +254,17 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <SafeAreaView style={styles.root}>
         <View style={styles.screen}>
+          {tab === 'home' && (
+            <HomeScreen
+              name={settings.name}
+              summary={summary}
+              futuresSummary={futuresSummary}
+              displayCurrency={settings.displayCurrency}
+              usdTry={usdTry}
+              onOpenSettings={() => setShowSettings(true)}
+              onGoMarket={() => setTab('market')}
+            />
+          )}
           {tab === 'portfolio' && (
             <PortfolioScreen
               summary={summary}
@@ -281,6 +293,13 @@ export default function App() {
 
         {/* Alt sekme çubuğu */}
         <View style={styles.tabBar}>
+          <TabButton
+            icon="home-outline"
+            iconActive="home"
+            label="Ana Sayfa"
+            active={tab === 'home'}
+            onPress={() => setTab('home')}
+          />
           <TabButton
             icon="wallet-outline"
             iconActive="wallet"
@@ -390,13 +409,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 6,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
     gap: 2,
   },
   tabInnerActive: { backgroundColor: colors.primary + '1F' },
   tabIcon: { fontSize: 19 },
   tabIconInactive: { opacity: 0.45 },
-  tabText: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
+  tabText: { color: colors.textDim, fontSize: 10, fontWeight: '600' },
   tabTextActive: { color: colors.primary },
 });

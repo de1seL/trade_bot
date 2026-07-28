@@ -12,12 +12,14 @@ export function SettingsModal({
   onSave: (s: Settings) => void;
   onClose: () => void;
 }) {
+  const [name, setName] = useState(settings.name);
   const [inflation, setInflation] = useState(String(settings.annualInflation));
 
   function save() {
     const n = parseFloat(inflation.replace(',', '.'));
     onSave({
       ...settings,
+      name: name.trim(),
       annualInflation: isNaN(n) ? settings.annualInflation : n,
     });
   }
@@ -35,6 +37,18 @@ export function SettingsModal({
       </View>
 
       <View style={styles.body}>
+        <Text style={styles.fieldLabel}>Adın</Text>
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+          placeholder="Ana sayfada seni böyle selamlarız"
+          placeholderTextColor={colors.textDim}
+        />
+        <Text style={[styles.hint, { marginBottom: spacing.xl }]}>
+          Ana sayfada "Merhaba {name.trim() || '...'}" olarak görünür.
+        </Text>
+
         <Text style={styles.fieldLabel}>Yıllık Enflasyon (%)</Text>
         <TextInput
           style={styles.input}

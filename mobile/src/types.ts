@@ -40,6 +40,8 @@ export interface Holding {
 
 // Uygulama ayarları.
 export interface Settings {
+  // Ana sayfada karşılama için kullanıcının adı.
+  name: string;
   // Reel (enflasyona göre düzeltilmiş) getiri için yıllık enflasyon (%).
   annualInflation: number;
   // Varsayılan görüntü para birimi.

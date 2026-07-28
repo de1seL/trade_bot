@@ -23,7 +23,7 @@ export interface MarketQuote {
 }
 
 // ── Binance ──────────────────────────────────────────────────
-async function binance24hr(
+export async function binance24hr(
   symbols: string[]
 ): Promise<Record<string, { last: number; change: number }>> {
   const url = `${T24}?symbols=${encodeURIComponent(JSON.stringify(symbols))}`;

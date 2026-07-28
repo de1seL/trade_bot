@@ -31,8 +31,9 @@ const POPULAR_BIST: { symbol: string; name: string }[] = [
   { symbol: 'SASA', name: 'Sasa Polyester' },
 ];
 
-// Tek bir hissenin fiyatı + günlük değişimi (Yahoo v8 chart).
-async function fetchChart(
+// Tek bir sembolün fiyatı + günlük değişimi (Yahoo v8 chart).
+// BIST hisseleri (.IS) ve endeksler (XU100.IS) için.
+export async function yahooQuote(
   fullSymbol: string
 ): Promise<{ price: number; change: number }> {
   const url = `${YQ}/v8/finance/chart/${encodeURIComponent(
@@ -80,7 +81,7 @@ async function quotesFor(
   refs: { symbol: string; name: string; fullSymbol: string }[]
 ): Promise<MarketQuote[]> {
   const settled = await Promise.allSettled(
-    refs.map((r) => fetchChart(r.fullSymbol))
+    refs.map((r) => yahooQuote(r.fullSymbol))
   );
   const out: MarketQuote[] = [];
   settled.forEach((s, i) => {
