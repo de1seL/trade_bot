@@ -54,6 +54,12 @@ export interface PricePair {
   usd: number;
 }
 
+// Toplam varlık değerinin zaman içindeki anlık kaydı (TL bazında).
+export interface Snapshot {
+  t: number; // zaman damgası (ms)
+  v: number; // toplam varlık (TL)
+}
+
 // Bir pozisyonun seçilen para biriminde hesaplanmış hali.
 export interface HoldingValue {
   holding: Holding;

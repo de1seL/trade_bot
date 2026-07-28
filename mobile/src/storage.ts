@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { FuturesPosition, Holding, Settings } from './types';
+import { FuturesPosition, Holding, Settings, Snapshot } from './types';
 
 const HOLDINGS_KEY = '@portfolio/holdings';
 const SETTINGS_KEY = '@portfolio/settings';
 const FUTURES_KEY = '@portfolio/futures';
+const HISTORY_KEY = '@portfolio/history';
 
 export const DEFAULT_SETTINGS: Settings = {
   name: '',
@@ -51,6 +52,25 @@ export async function loadFutures(): Promise<FuturesPosition[]> {
 export async function saveFutures(list: FuturesPosition[]): Promise<void> {
   try {
     await AsyncStorage.setItem(FUTURES_KEY, JSON.stringify(list));
+  } catch {
+    // sessizce geç
+  }
+}
+
+export async function loadHistory(): Promise<Snapshot[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveHistory(list: Snapshot[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(list));
   } catch {
     // sessizce geç
   }

@@ -7,14 +7,16 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
-import { Currency, FuturesSummary, PortfolioSummary } from '../types';
+import { Currency, FuturesSummary, PortfolioSummary, Snapshot } from '../types';
 import { colors, spacing, radius } from '../theme';
 import { formatMoney, formatTRY, formatUSD, formatPct, formatQty } from '../utils/format';
 import { fetchHomeIndicators, Indicator } from '../prices/home';
 import { fetchCryptoMarket } from '../prices/market';
 import { fetchStockMarket } from '../prices/stocks';
 import { MarketQuote } from '../prices/market';
+import { LineChart } from '../components/LineChart';
 
 function fmtIndicator(i: Indicator): string {
   if (i.unit === 'USD') return formatUSD(i.value);
@@ -28,6 +30,7 @@ export function HomeScreen({
   futuresSummary,
   displayCurrency,
   usdTry,
+  history,
   onOpenSettings,
   onGoMarket,
 }: {
@@ -36,6 +39,7 @@ export function HomeScreen({
   futuresSummary: FuturesSummary;
   displayCurrency: Currency;
   usdTry: number | null;
+  history: Snapshot[];
   onOpenSettings: () => void;
   onGoMarket: () => void;
 }) {
@@ -112,6 +116,23 @@ export function HomeScreen({
             </Text>
           </View>
         </View>
+
+        {history.length >= 2 ? (
+          <View style={styles.chartWrap}>
+            <LineChart
+              data={history.map((h) => h.v)}
+              width={Dimensions.get('window').width - spacing.lg * 2 - spacing.xl * 2}
+              height={120}
+            />
+            <Text style={styles.chartHint}>
+              Toplam varlığın zaman içindeki değişimi (uygulamayı kullandıkça birikir)
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.chartHint}>
+            Grafik, uygulamayı kullandıkça birikir — birazdan burada belirir.
+          </Text>
+        )}
       </View>
 
       {/* Göstergeler: Dolar / Euro / BIST 100 / Bitcoin */}
@@ -214,6 +235,8 @@ const styles = StyleSheet.create({
   pnl: { fontSize: 16, fontWeight: '600' },
   pctPill: { borderRadius: 20, paddingHorizontal: spacing.md, paddingVertical: 4 },
   pctText: { fontSize: 13, fontWeight: '700' },
+  chartWrap: { marginTop: spacing.lg },
+  chartHint: { color: colors.textDim, fontSize: 11, marginTop: spacing.sm },
   indGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

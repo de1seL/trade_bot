@@ -15,6 +15,7 @@ import {
   Holding,
   PricePair,
   Settings,
+  Snapshot,
 } from './src/types';
 import { colors, spacing, radius } from './src/theme';
 import {
@@ -22,6 +23,8 @@ import {
   saveHoldings,
   loadFutures,
   saveFutures,
+  loadHistory,
+  saveHistory,
   loadSettings,
   saveSettings,
   DEFAULT_SETTINGS,
@@ -47,6 +50,7 @@ export default function App() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [futures, setFutures] = useState<FuturesPosition[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [history, setHistory] = useState<Snapshot[]>([]);
   const [pairs, setPairs] = useState<Record<string, PricePair>>({}); // coingeckoId -> {try,usd}
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({}); // BIST sembol -> TL
   const [goldPrices, setGoldPrices] = useState<Record<string, number>>({}); // GRAM/ONS -> TL
@@ -127,14 +131,16 @@ export default function App() {
   // Açılışta kayıtlı veriyi yükle, sonra fiyatları çek.
   useEffect(() => {
     (async () => {
-      const [h, f, s] = await Promise.all([
+      const [h, f, s, hist] = await Promise.all([
         loadHoldings(),
         loadFutures(),
         loadSettings(),
+        loadHistory(),
       ]);
       setHoldings(h);
       setFutures(f);
       setSettings(s);
+      setHistory(hist);
       refreshMarket(h, f);
     })();
   }, [refreshMarket]);
@@ -193,6 +199,31 @@ export default function App() {
     () => buildFuturesSummary(futures, pairs),
     [futures, pairs]
   );
+
+  // Toplam varlık (TL) — geçmiş kaydı para biriminden bağımsız olsun diye.
+  const combinedTRY = useMemo(() => {
+    const trySummary = buildSummary(holdings, spotPriceMap, usdTry, settings, 'TRY');
+    const f = usdTry ?? 0;
+    return (
+      trySummary.totalValue +
+      (futuresSummary.totalMargin + futuresSummary.totalPnl) * f
+    );
+  }, [holdings, spotPriceMap, usdTry, settings, futuresSummary]);
+
+  // Anlık kayıt: 30 dk'da bir yeni nokta; arada son noktayı güncelle.
+  useEffect(() => {
+    if (combinedTRY <= 0) return;
+    setHistory((prev) => {
+      const now = Date.now();
+      const last = prev[prev.length - 1];
+      const next: Snapshot[] =
+        !last || now - last.t >= 30 * 60 * 1000
+          ? [...prev, { t: now, v: combinedTRY }].slice(-500)
+          : [...prev.slice(0, -1), { t: last.t, v: combinedTRY }];
+      saveHistory(next);
+      return next;
+    });
+  }, [combinedTRY]);
 
   const addHolding = useCallback(
     (h: Holding) => {
@@ -261,6 +292,7 @@ export default function App() {
               futuresSummary={futuresSummary}
               displayCurrency={settings.displayCurrency}
               usdTry={usdTry}
+              history={history}
               onOpenSettings={() => setShowSettings(true)}
               onGoMarket={() => setTab('market')}
             />
