@@ -62,6 +62,41 @@ export function formatQty(value: number): string {
   return formatNumberTR(value, 0, 8);
 }
 
+// Kullanıcının yazdığı sayıyı akıllıca çöz (TR/EN karışık girişe dayanıklı):
+//  - "1.234,56" veya "1,234.56" → 1234.56  (son ayraç ondalık)
+//  - "1,885" veya "1.885"       → 1885      (tek ayraç + 3 hane = binlik)
+//  - "0,5" / "1,88" / "12,5"    → ondalık
+//  - "1885"                     → 1885
+export function parseTRNumber(s: string): number {
+  const str = (s ?? '').trim();
+  if (!str) return 0;
+  const hasComma = str.includes(',');
+  const hasDot = str.includes('.');
+
+  let dec: ',' | '.' | null = null;
+  if (hasComma && hasDot) {
+    dec = str.lastIndexOf(',') > str.lastIndexOf('.') ? ',' : '.';
+  } else if (hasComma || hasDot) {
+    const sep = hasComma ? ',' : '.';
+    const occ = str.split(sep).length - 1;
+    const after = str.slice(str.lastIndexOf(sep) + 1);
+    // Tek ayraç + arkasından tam 3 hane → binlik (ondalık değil).
+    dec = occ === 1 && after.length !== 3 ? sep : null;
+  }
+
+  let normalized: string;
+  if (!dec) {
+    normalized = str.replace(/[.,]/g, '');
+  } else {
+    const idx = str.lastIndexOf(dec);
+    const intp = str.slice(0, idx).replace(/[.,]/g, '');
+    const frac = str.slice(idx + 1).replace(/[.,]/g, '');
+    normalized = `${intp}.${frac}`;
+  }
+  const n = parseFloat(normalized);
+  return isNaN(n) ? 0 : n;
+}
+
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '-';

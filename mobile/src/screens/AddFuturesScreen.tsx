@@ -14,6 +14,7 @@ import { colors, spacing, radius } from '../theme';
 import { CoinOption } from '../prices/coins';
 import { CoinSearch } from '../components/CoinSearch';
 import { NumberInput } from '../components/NumberInput';
+import { parseTRNumber } from '../utils/format';
 
 const LEVERAGES = [1, 2, 3, 5, 10, 20, 25, 50, 75, 100];
 
@@ -21,10 +22,7 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function parseNum(s: string): number {
-  const n = parseFloat(s.replace(',', '.'));
-  return isNaN(n) ? 0 : n;
-}
+const parseNum = parseTRNumber;
 
 export function AddFuturesScreen({
   onAdd,

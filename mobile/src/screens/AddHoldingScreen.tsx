@@ -18,6 +18,7 @@ import { StockRef } from '../prices/stocks';
 import { FundSearch } from '../components/FundSearch';
 import { FX_CURRENCIES } from '../prices/fx';
 import { NumberInput } from '../components/NumberInput';
+import { parseTRNumber } from '../utils/format';
 
 const TYPES: AssetType[] = ['crypto', 'stock', 'gold', 'fx', 'fund', 'cash'];
 const CURRENCIES: { value: BuyCurrency; label: string }[] = [
@@ -36,10 +37,7 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function parseNum(s: string): number {
-  const n = parseFloat(s.replace(',', '.'));
-  return isNaN(n) ? 0 : n;
-}
+const parseNum = parseTRNumber;
 
 function curSymbol(c: BuyCurrency): string {
   if (c === 'TRY') return '₺';
