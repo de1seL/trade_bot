@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -45,12 +45,20 @@ function curSymbol(c: BuyCurrency): string {
   return c; // USDT / USDC
 }
 
+export interface AddPrefill {
+  type: AssetType;
+  coin?: CoinOption;
+  stock?: StockRef;
+}
+
 export function AddHoldingScreen({
   currentUsdTry,
+  prefill,
   onAdd,
   onClose,
 }: {
   currentUsdTry: number | null;
+  prefill?: AddPrefill | null;
   onAdd: (h: Holding) => void;
   onClose: () => void;
 }) {
@@ -70,6 +78,14 @@ export function AddHoldingScreen({
   const [manualPrice, setManualPrice] = useState('');
   const [buyDate, setBuyDate] = useState(todayISO());
   const [error, setError] = useState('');
+
+  // Piyasa'dan "Portföye Ekle" ile gelen ön seçim.
+  useEffect(() => {
+    if (!prefill) return;
+    setType(prefill.type);
+    if (prefill.coin) setSelectedCoin(prefill.coin);
+    if (prefill.stock) setSelectedStock(prefill.stock);
+  }, [prefill]);
 
   const isCrypto = type === 'crypto';
   const isStock = type === 'stock';

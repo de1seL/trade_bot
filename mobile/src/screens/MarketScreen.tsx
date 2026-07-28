@@ -20,6 +20,7 @@ import {
 import { searchCoins } from '../prices/search';
 import { fetchStockMarket, searchStocks, fetchStockQuotes } from '../prices/stocks';
 import { AssetDetailModal } from '../components/AssetDetailModal';
+import { AddPrefill } from './AddHoldingScreen';
 
 type Category = 'crypto' | 'stock' | 'gold' | 'silver';
 
@@ -30,7 +31,11 @@ const CATEGORIES: { key: Category; label: string }[] = [
   { key: 'silver', label: 'Gümüş' },
 ];
 
-export function MarketScreen() {
+export function MarketScreen({
+  onAddToPortfolio,
+}: {
+  onAddToPortfolio: (p: AddPrefill) => void;
+}) {
   const [category, setCategory] = useState<Category>('crypto');
   const [quotes, setQuotes] = useState<MarketQuote[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,6 +54,30 @@ export function MarketScreen() {
   const openDetail = (q: MarketQuote) => {
     setSelectedKind(category === 'stock' ? 'stock' : 'crypto');
     setSelected(q);
+  };
+
+  const addSelectedToPortfolio = () => {
+    if (!selected) return;
+    if (selectedKind === 'crypto') {
+      onAddToPortfolio({
+        type: 'crypto',
+        coin: {
+          symbol: selected.symbol,
+          name: selected.name,
+          coingeckoId: selected.key,
+        },
+      });
+    } else {
+      onAddToPortfolio({
+        type: 'stock',
+        stock: {
+          symbol: selected.symbol,
+          fullSymbol: `${selected.symbol}.IS`,
+          name: selected.name,
+        },
+      });
+    }
+    setSelected(null);
   };
 
   const load = useCallback(async (cat: Category) => {
@@ -213,6 +242,7 @@ export function MarketScreen() {
         kind={selectedKind}
         quote={selected}
         onClose={() => setSelected(null)}
+        onAddToPortfolio={addSelectedToPortfolio}
       />
     </View>
   );

@@ -40,7 +40,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { FuturesScreen } from './src/screens/FuturesScreen';
 import { MarketScreen } from './src/screens/MarketScreen';
-import { AddHoldingScreen } from './src/screens/AddHoldingScreen';
+import { AddHoldingScreen, AddPrefill } from './src/screens/AddHoldingScreen';
 import { AddFuturesScreen } from './src/screens/AddFuturesScreen';
 import { SettingsModal } from './src/screens/SettingsModal';
 
@@ -61,6 +61,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [showAdd, setShowAdd] = useState(false);
+  const [addPrefill, setAddPrefill] = useState<AddPrefill | null>(null);
   const [showAddFutures, setShowAddFutures] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -305,7 +306,10 @@ export default function App() {
               priceError={priceError}
               onSetCurrency={setCurrency}
               onRefresh={() => refreshMarket(holdings, futures)}
-              onAdd={() => setShowAdd(true)}
+              onAdd={() => {
+                setAddPrefill(null);
+                setShowAdd(true);
+              }}
               onDelete={deleteHolding}
               onOpenSettings={() => setShowSettings(true)}
             />
@@ -320,7 +324,14 @@ export default function App() {
               onDelete={deleteFutures}
             />
           )}
-          {tab === 'market' && <MarketScreen />}
+          {tab === 'market' && (
+            <MarketScreen
+              onAddToPortfolio={(p) => {
+                setAddPrefill(p);
+                setShowAdd(true);
+              }}
+            />
+          )}
         </View>
 
         {/* Alt sekme çubuğu */}
@@ -366,6 +377,7 @@ export default function App() {
       <Modal visible={showAdd} animationType="slide" presentationStyle="pageSheet">
         <AddHoldingScreen
           currentUsdTry={usdTry}
+          prefill={addPrefill}
           onAdd={addHolding}
           onClose={() => setShowAdd(false)}
         />

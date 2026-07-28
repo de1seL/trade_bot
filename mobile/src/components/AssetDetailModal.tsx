@@ -44,11 +44,13 @@ export function AssetDetailModal({
   kind,
   quote,
   onClose,
+  onAddToPortfolio,
 }: {
   visible: boolean;
   kind: Kind;
   quote: MarketQuote | null;
   onClose: () => void;
+  onAddToPortfolio?: () => void;
 }) {
   const [minutes, setMinutes] = useState(1440); // varsayılan 1 gün
   const [data, setData] = useState<number[]>([]);
@@ -135,6 +137,12 @@ export function AssetDetailModal({
             {quote ? formatPct(quote.changePct) : ''}
           </Text>
         </View>
+
+        {onAddToPortfolio && (
+          <TouchableOpacity style={styles.addBtn} onPress={onAddToPortfolio}>
+            <Text style={styles.addBtnText}>＋ Portföye Ekle</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.chartBox}>
           {loading ? (
@@ -256,6 +264,14 @@ const styles = StyleSheet.create({
   },
   price: { color: colors.text, fontSize: 26, fontWeight: '700' },
   change: { fontSize: 16, fontWeight: '600' },
+  addBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  addBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   chartBox: {
     height: 230,
     justifyContent: 'center',
