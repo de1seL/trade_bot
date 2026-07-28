@@ -21,6 +21,7 @@ import { searchCoins } from '../prices/search';
 import { fetchStockMarket, searchStocks, fetchStockQuotes } from '../prices/stocks';
 import { AssetDetailModal } from '../components/AssetDetailModal';
 import { AddPrefill } from './AddHoldingScreen';
+import { PriceAlert } from '../types';
 
 type Category = 'crypto' | 'stock' | 'gold' | 'silver';
 
@@ -33,8 +34,14 @@ const CATEGORIES: { key: Category; label: string }[] = [
 
 export function MarketScreen({
   onAddToPortfolio,
+  alerts,
+  onCreateAlert,
+  onDeleteAlert,
 }: {
   onAddToPortfolio: (p: AddPrefill) => void;
+  alerts: PriceAlert[];
+  onCreateAlert: (a: PriceAlert) => void;
+  onDeleteAlert: (id: string) => void;
 }) {
   const [category, setCategory] = useState<Category>('crypto');
   const [quotes, setQuotes] = useState<MarketQuote[]>([]);
@@ -243,6 +250,27 @@ export function MarketScreen({
         quote={selected}
         onClose={() => setSelected(null)}
         onAddToPortfolio={addSelectedToPortfolio}
+        alerts={
+          selected
+            ? alerts.filter(
+                (a) => a.kind === selectedKind && a.symbol === selected.symbol
+              )
+            : []
+        }
+        onCreateAlert={(target, direction) => {
+          if (!selected) return;
+          onCreateAlert({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            kind: selectedKind,
+            symbol: selected.symbol,
+            name: selected.name,
+            coingeckoId: selectedKind === 'crypto' ? selected.key : undefined,
+            target,
+            direction,
+            currency: selectedKind === 'crypto' ? 'USD' : 'TRY',
+          });
+        }}
+        onDeleteAlert={onDeleteAlert}
       />
     </View>
   );

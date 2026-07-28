@@ -60,6 +60,18 @@ export interface Snapshot {
   v: number; // toplam varlık (TL)
 }
 
+// Fiyat alarmı — hedef fiyat aşılınca (uygulama açıkken) uyarı verir.
+export interface PriceAlert {
+  id: string;
+  kind: 'crypto' | 'stock';
+  symbol: string;
+  name: string;
+  coingeckoId?: string; // kripto için
+  target: number;
+  direction: 'above' | 'below'; // üstüne çıkınca / altına inince
+  currency: 'USD' | 'TRY'; // kripto USD, hisse TL
+}
+
 // Bir pozisyonun seçilen para biriminde hesaplanmış hali.
 export interface HoldingValue {
   holding: Holding;

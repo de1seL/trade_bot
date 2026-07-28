@@ -7,6 +7,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -16,6 +17,7 @@ import {
   PricePair,
   Settings,
   Snapshot,
+  PriceAlert,
 } from './src/types';
 import { colors, spacing, radius } from './src/theme';
 import {
@@ -25,6 +27,8 @@ import {
   saveFutures,
   loadHistory,
   saveHistory,
+  loadAlerts,
+  saveAlerts,
   loadSettings,
   saveSettings,
   DEFAULT_SETTINGS,
@@ -51,6 +55,9 @@ export default function App() {
   const [futures, setFutures] = useState<FuturesPosition[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [history, setHistory] = useState<Snapshot[]>([]);
+  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+  const alertsRef = useRef<PriceAlert[]>([]);
+  alertsRef.current = alerts;
   const [pairs, setPairs] = useState<Record<string, PricePair>>({}); // coingeckoId -> {try,usd}
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({}); // BIST sembol -> TL
   const [goldPrices, setGoldPrices] = useState<Record<string, number>>({}); // GRAM/ONS -> TL
@@ -94,6 +101,19 @@ export default function App() {
         }
       }
 
+      // Alarmı olan varlıkların fiyatı da çekilsin (portföyde olmasa bile).
+      for (const a of alertsRef.current) {
+        if (a.kind === 'crypto') add(a.coingeckoId, a.symbol);
+        else if (a.kind === 'stock' && !seenStock.has(a.symbol)) {
+          seenStock.add(a.symbol);
+          stockRefs.push({
+            symbol: a.symbol,
+            fullSymbol: `${a.symbol}.IS`,
+            name: a.name,
+          });
+        }
+      }
+
       const hasGold = hList.some((h) => h.type === 'gold');
       const hasFx = hList.some((h) => h.type === 'fx');
       const fundCodes = Array.from(
@@ -125,6 +145,35 @@ export default function App() {
       if (res.usdTry !== null) setUsdTry(res.usdTry);
       setPriceError(res.ok ? undefined : res.error);
       setRefreshing(false);
+
+      // Fiyat alarmlarını kontrol et.
+      const triggered: PriceAlert[] = [];
+      for (const a of alertsRef.current) {
+        let price: number | undefined;
+        if (a.kind === 'crypto' && a.coingeckoId) {
+          price = res.pairs[a.coingeckoId]?.usd; // kripto USD
+        } else if (a.kind === 'stock') {
+          price = sp[a.symbol]; // hisse TL
+        }
+        if (price === undefined) continue;
+        const hit = a.direction === 'above' ? price >= a.target : price <= a.target;
+        if (hit) triggered.push(a);
+      }
+      if (triggered.length > 0) {
+        const remaining = alertsRef.current.filter(
+          (a) => !triggered.some((t) => t.id === a.id)
+        );
+        setAlerts(remaining);
+        saveAlerts(remaining);
+        const msg = triggered
+          .map((t) => {
+            const sym = t.currency === 'USD' ? '$' : '₺';
+            const arrow = t.direction === 'above' ? '≥' : '≤';
+            return `${t.symbol} ${arrow} ${sym}${t.target}`;
+          })
+          .join('\n');
+        Alert.alert('🔔 Fiyat Alarmı', msg);
+      }
     },
     []
   );
@@ -132,16 +181,18 @@ export default function App() {
   // Açılışta kayıtlı veriyi yükle, sonra fiyatları çek.
   useEffect(() => {
     (async () => {
-      const [h, f, s, hist] = await Promise.all([
+      const [h, f, s, hist, al] = await Promise.all([
         loadHoldings(),
         loadFutures(),
         loadSettings(),
         loadHistory(),
+        loadAlerts(),
       ]);
       setHoldings(h);
       setFutures(f);
       setSettings(s);
       setHistory(hist);
+      setAlerts(al);
       refreshMarket(h, f);
     })();
   }, [refreshMarket]);
@@ -272,6 +323,22 @@ export default function App() {
     setShowSettings(false);
   }, []);
 
+  const createAlert = useCallback((a: PriceAlert) => {
+    setAlerts((prev) => {
+      const next = [...prev, a];
+      saveAlerts(next);
+      return next;
+    });
+  }, []);
+
+  const deleteAlert = useCallback((id: string) => {
+    setAlerts((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      saveAlerts(next);
+      return next;
+    });
+  }, []);
+
   const setCurrency = useCallback(
     (c: Currency) => {
       const s = { ...settings, displayCurrency: c };
@@ -330,6 +397,9 @@ export default function App() {
                 setAddPrefill(p);
                 setShowAdd(true);
               }}
+              alerts={alerts}
+              onCreateAlert={createAlert}
+              onDeleteAlert={deleteAlert}
             />
           )}
         </View>

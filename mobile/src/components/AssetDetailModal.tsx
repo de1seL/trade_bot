@@ -8,13 +8,16 @@ import {
   ActivityIndicator,
   Dimensions,
   TextInput,
+  ScrollView,
 } from 'react-native';
 import { colors, spacing, radius } from '../theme';
-import { formatTRY, formatUSD, formatPct } from '../utils/format';
+import { formatTRY, formatUSD, formatPct, parseTRNumber } from '../utils/format';
 import { MarketQuote } from '../prices/market';
 import { fetchCryptoHistory } from '../prices/history';
 import { fetchStockHistory } from '../prices/stocks';
 import { LineChart } from './LineChart';
+import { NumberInput } from './NumberInput';
+import { PriceAlert } from '../types';
 
 type Kind = 'crypto' | 'stock';
 
@@ -45,12 +48,18 @@ export function AssetDetailModal({
   quote,
   onClose,
   onAddToPortfolio,
+  alerts = [],
+  onCreateAlert,
+  onDeleteAlert,
 }: {
   visible: boolean;
   kind: Kind;
   quote: MarketQuote | null;
   onClose: () => void;
   onAddToPortfolio?: () => void;
+  alerts?: PriceAlert[];
+  onCreateAlert?: (target: number, direction: 'above' | 'below') => void;
+  onDeleteAlert?: (id: string) => void;
 }) {
   const [minutes, setMinutes] = useState(1440); // varsayılan 1 gün
   const [data, setData] = useState<number[]>([]);
@@ -59,6 +68,8 @@ export function AssetDetailModal({
   const [showCustom, setShowCustom] = useState(false);
   const [customText, setCustomText] = useState('');
   const [customUnit, setCustomUnit] = useState<'min' | 'hour' | 'day'>('day');
+  const [alertText, setAlertText] = useState('');
+  const [alertDir, setAlertDir] = useState<'above' | 'below'>('above');
 
   useEffect(() => {
     if (!visible || !quote) return;
@@ -114,7 +125,7 @@ export function AssetDetailModal({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <View>
             <Text style={styles.symbol}>{quote?.symbol}</Text>
@@ -240,13 +251,74 @@ export function AssetDetailModal({
           Grafik {kind === 'crypto' ? 'Binance/CoinGecko' : 'Yahoo Finance'}{' '}
           verisiyle, {kind === 'crypto' ? 'USD' : 'TL'} bazında.
         </Text>
-      </View>
+
+        {/* Fiyat Alarmı */}
+        {onCreateAlert && (
+          <View style={styles.alertSection}>
+            <Text style={styles.alertTitle}>🔔 Fiyat Alarmı</Text>
+            <View style={styles.alertDirRow}>
+              {([
+                { d: 'above', label: 'Üstüne çıkınca' },
+                { d: 'below', label: 'Altına inince' },
+              ] as const).map((x) => (
+                <TouchableOpacity
+                  key={x.d}
+                  onPress={() => setAlertDir(x.d)}
+                  style={[styles.dirBtn, alertDir === x.d && styles.dirBtnActive]}
+                >
+                  <Text style={[styles.dirText, alertDir === x.d && styles.dirTextActive]}>
+                    {x.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.customRow}>
+              <NumberInput
+                style={styles.customInput}
+                placeholder={`Hedef fiyat (${kind === 'crypto' ? '$' : '₺'})`}
+                value={alertText}
+                onChangeText={setAlertText}
+              />
+              <TouchableOpacity
+                style={styles.customApply}
+                onPress={() => {
+                  const t = parseTRNumber(alertText);
+                  if (t > 0) {
+                    onCreateAlert(t, alertDir);
+                    setAlertText('');
+                  }
+                }}
+              >
+                <Text style={styles.customApplyText}>Kur</Text>
+              </TouchableOpacity>
+            </View>
+
+            {alerts.map((a) => (
+              <View key={a.id} style={styles.alertRow}>
+                <Text style={styles.alertRowText}>
+                  {a.direction === 'above' ? '≥' : '≤'}{' '}
+                  {a.currency === 'USD' ? formatUSD(a.target) : formatTRY(a.target)}
+                </Text>
+                {onDeleteAlert && (
+                  <TouchableOpacity onPress={() => onDeleteAlert(a.id)} hitSlop={8}>
+                    <Text style={styles.alertDelete}>Sil</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+            <Text style={styles.note}>
+              Alarm, uygulama açıkken hedef fiyat aşılınca uyarır.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, paddingBottom: spacing.xl * 2 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -332,4 +404,38 @@ const styles = StyleSheet.create({
   },
   customApplyText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   note: { color: colors.textDim, fontSize: 11, marginTop: spacing.lg },
+  alertSection: {
+    marginTop: spacing.xl,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.lg,
+  },
+  alertTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: spacing.md },
+  alertDirRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  dirBtn: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.sm,
+  },
+  dirBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dirText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
+  dirTextActive: { color: '#fff' },
+  alertRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  alertRowText: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  alertDelete: { color: colors.textDim, fontSize: 12 },
 });
