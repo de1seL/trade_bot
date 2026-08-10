@@ -24,7 +24,12 @@ import numpy as np
 import trade_bot as tb
 
 log = tb.log
-tb.CONFIG["dry_run"] = True                 # gerçek emir YOK, private çağrı YOK
+
+# ── CANLI / DRY-RUN anahtarı ──
+# LIVE=True → GERÇEK EMİR açar (gerçek para). False → kağıt (dry-run).
+# Dry-run'a dönmek için sadece bunu False yap.
+LIVE = True
+tb.CONFIG["dry_run"] = not LIVE             # canlıda gerçek emir + private çağrı
 # Coin havuzunu genişlet: get_symbols "24s'te ≥%3 oynayan" filtresini kullanıyor →
 # sakin günde ~40 coin geçiyor. 3.0→1.5 ile daha çok coin havuza girer (~70-80).
 # Hacim ≥$10M filtresi DURUYOR (likidite mean-reversion için önemli).
@@ -182,6 +187,105 @@ def pnl_pct(side, entry, exit_px):
     return raw - COST_FR * 2 * 100 * LEV
 
 
+# ─────────────────────────────────────────────────────────────
+# CANLI EMİR (LIVE=True iken gerçek emir; dry-run'da hiçbir şey yapmaz)
+# ─────────────────────────────────────────────────────────────
+
+def calc_amount(ex, price):
+    """TRADE_USDT marj × LEV kaldıraç → kontrat miktarı (hassasiyetli)."""
+    return price and (TRADE_USDT * LEV) / price
+
+
+def open_live(ex, sym, side, entry, sl):
+    """Gerçek pozisyon açar + borsaya felaket-stop (STOP_MARKET) koyar.
+    Borsa-taraflı stop = bot çökse bile pozisyon korunur (yazılım stopuna güvenmeyiz).
+    Döner: (gerçek_giriş_fiyatı, miktar) veya None."""
+    if not LIVE:
+        return entry, 0.0
+    if not tb.ensure_leverage(ex, sym, LEV):
+        return None
+    amt = tb._amt(ex, sym, calc_amount(ex, entry))
+    oside = "buy" if side == "LONG" else "sell"
+    cside = "sell" if side == "LONG" else "buy"
+    try:
+        tb.cancel_open_orders(ex, sym)
+        ex.create_market_order(sym, oside, amt)
+    except Exception as e:
+        log.error(f"❌ [{sym}] AÇMA başarısız: {e}")
+        return None
+    # borsa-taraflı felaket-stop (closePosition → miktar kayması sorunu olmaz)
+    try:
+        ex.create_order(sym, "STOP_MARKET", cside, amt, None,
+                        {"stopPrice": tb._prc(ex, sym, sl), "closePosition": True})
+    except Exception as e:
+        log.error(f"⚠️  [{sym}] Borsa stopu konulamadı (yazılım stopu devrede): {e}")
+    # gerçek giriş fiyatını oku (yoksa sinyal fiyatı)
+    try:
+        pos = ex.fetch_positions([sym])
+        for p in pos:
+            ep = p.get("entryPrice") or p.get("entryPx")
+            if ep:
+                return float(ep), amt
+    except Exception:
+        pass
+    return entry, amt
+
+
+def close_live(ex, sym, side, fallback_px):
+    """Gerçek pozisyonu piyasa emriyle kapatır (reduceOnly). Döner: gerçek çıkış fiyatı."""
+    if not LIVE:
+        return fallback_px
+    # mevcut miktarı borsadan oku
+    amt = 0.0
+    try:
+        for p in ex.fetch_positions([sym]):
+            amt = abs(float(p.get("contracts") or 0))
+    except Exception:
+        pass
+    if amt <= 0:
+        return fallback_px
+    tb.send_close(ex, sym, side, amt, fallback_px)     # cancel+reduceOnly+retry (denenmiş)
+    return tb.fetch_exit_price(ex, sym, fallback_px)
+
+
+def reconcile(ex, positions):
+    """KULLANICI MANUEL KAPATTIYSA (veya borsa stopu tetiklendiyse) algıla:
+    borsada artık olmayan pozisyonu state'ten düşür, PnL'i kaydet + bildir."""
+    if not LIVE or not positions:
+        return
+    try:
+        raw = ex.fetch_positions(list(positions.keys()))
+    except Exception as e:
+        log.warning(f"⚠️  Mutabakat okunamadı (bu döngü atlanıyor): {e}")
+        return
+    live = {}
+    for p in raw:
+        try:
+            live[p.get("symbol")] = abs(float(p.get("contracts") or 0))
+        except Exception:
+            pass
+    for sym in list(positions.keys()):
+        if live.get(sym, 0) < 1e-12:            # borsada YOK → dışarıdan kapatılmış
+            p = positions[sym]
+            exit_px = tb.fetch_exit_price(ex, sym, p["entry"])
+            pct = pnl_pct(p["side"], p["entry"], exit_px)
+            usdt = TRADE_USDT * pct / 100
+            dur = (now_utc() - datetime.fromisoformat(p["opened"])).total_seconds() / 60
+            emoji = "✅" if pct > 0 else "❌"
+            log.info(f"🔄 [{sym}] borsada kapalı (manuel/stop) — senkronlandı {pct:+.2f}%")
+            log_trade({"time": now_utc().strftime("%Y-%m-%d %H:%M:%S"),
+                       "symbol": sym.split("/")[0], "side": p["side"],
+                       "entry": p["entry"], "exit": round(exit_px, 8),
+                       "pnl_pct": round(pct, 2), "pnl_usdt": round(usdt, 2),
+                       "reason": "MANUAL/EXCH", "dur_min": round(dur)})
+            try: tb.cancel_open_orders(ex, sym)     # varsa artık kalan stop emrini iptal et
+            except Exception: pass
+            del positions[sym]
+            save_state(positions)
+            tb.notify(f"🔄 <b>{sym.split('/')[0]} borsada kapatılmış</b> (manuel/stop)  {p['side']}\n"
+                      f"PnL: <b>{pct:+.2f}%</b> ({usdt:+.2f}$)  •  {dur:.0f}dk\n{stats_line()}")
+
+
 def main():
     if _lock_alive():
         log.error("⛔ Başka bir mr_bot ZATEN çalışıyor (mr_bot.lock taze). "
@@ -189,12 +293,17 @@ def main():
         log.error("   Gerçekten tek kopya kaldıysa mr_bot.lock dosyasını sil ve tekrar başlat.")
         return
     _touch_lock()
-    log.info("🟣 MEAN-REVERSION DRY-RUN başlıyor (RSI<5+BB+200EMA, 5x kağıt)")
-    log.info(f"   max {MAX_POSITIONS} poz, {TRADE_USDT}$/poz (kağıt), tarama {TOP_N} coin")
+    mode = "🔴 CANLI (GERÇEK PARA)" if LIVE else "🟣 DRY-RUN (kağıt)"
+    para = "gerçek" if LIVE else "kağıt"
+    log.info(f"{mode} MEAN-REVERSION başlıyor (RSI<5+BB+200EMA, {LEV}x)")
+    log.info(f"   max {MAX_POSITIONS} poz, {TRADE_USDT}$/poz, tarama {TOP_N} coin")
     notify_ok = tb.CONFIG.get("notify_telegram") and tb.TELEGRAM_TOKEN and tb.TELEGRAM_CHAT_ID
-    tb.notify("🟣 <b>Mean-Reversion DRY-RUN başladı</b>\n"
-              "RSI(2)&lt;5 + Bollinger + 200EMA | 5x kağıt | gerçek emir YOK\n"
-              "Sinyaller ve kağıt sonuçlar buraya düşecek.")
+    tb.notify(f"{mode} <b>Mean-Reversion başladı</b>\n"
+              f"RSI(2)&lt;5 + Bollinger + 200EMA | {LEV}x | {para} emir\n"
+              + ("⚠️ GERÇEK PARA — manuel kapatma borsadan algılanır." if LIVE
+                 else "Sinyaller ve kağıt sonuçlar buraya düşecek."))
+    if LIVE and (not tb.os.getenv("BINANCE_API_KEY") or not tb.os.getenv("BINANCE_SECRET")):
+        log.error("🚫 CANLI mod ama .env'de BINANCE_API_KEY/BINANCE_SECRET yok — emir açılamaz!")
     if not notify_ok:
         log.warning("⚠️  Telegram kapalı/token yok — mesajlar sadece log'a. (.env: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)")
 
@@ -215,6 +324,12 @@ def main():
                     symbols = symbols or tb.FALLBACK
                 last_refresh = time.time()
 
+            TAG = "" if LIVE else "[DRY] "
+            para = "" if LIVE else " kağıt"
+
+            # 0) MUTABAKAT: kullanıcı Binance'ten manuel kapattıysa algıla, senkronla
+            reconcile(ex, positions)
+
             # 1) açık pozisyonları yönet (çıkış kontrolü)
             for sym in list(positions.keys()):
                 p = positions[sym]
@@ -225,11 +340,12 @@ def main():
                 ex_res = check_exit(df, p)
                 if ex_res:
                     reason, exit_px = ex_res
+                    exit_px = close_live(ex, sym, p["side"], exit_px)   # canlıda gerçek kapat
                     pct = pnl_pct(p["side"], p["entry"], exit_px)
                     usdt = TRADE_USDT * pct / 100
                     dur = (now_utc() - datetime.fromisoformat(p["opened"])).total_seconds() / 60
                     emoji = "✅" if pct > 0 else "❌"
-                    log.info(f"{emoji} [DRY] {sym} {p['side']} KAPAT {pct:+.2f}% ({reason})")
+                    log.info(f"{emoji} {TAG}{sym} {p['side']} KAPAT {pct:+.2f}% ({reason})")
                     log_trade({"time": now_utc().strftime("%Y-%m-%d %H:%M:%S"),
                                "symbol": sym.split("/")[0], "side": p["side"],
                                "entry": p["entry"], "exit": round(exit_px, 8),
@@ -237,9 +353,9 @@ def main():
                                "reason": reason, "dur_min": round(dur)})
                     del positions[sym]
                     save_state(positions)
-                    tb.notify(f"{emoji} <b>[DRY] {sym.split('/')[0]} KAPAT</b>  {p['side']}\n"
+                    tb.notify(f"{emoji} <b>{TAG}{sym.split('/')[0]} KAPAT</b>  {p['side']}\n"
                               f"giriş {p['entry']:.6g} → çıkış {exit_px:.6g}\n"
-                              f"PnL: <b>{pct:+.2f}%</b> ({usdt:+.2f}$ kağıt)  •  {reason}  •  {dur:.0f}dk\n"
+                              f"PnL: <b>{pct:+.2f}%</b> ({usdt:+.2f}${para})  •  {reason}  •  {dur:.0f}dk\n"
                               f"{stats_line()}")
 
             # 2) yeni giriş ara (boş slot varsa)
@@ -258,15 +374,19 @@ def main():
                     sig = check_entry(df)
                     if sig:
                         side, entry, sl, tgt = sig
+                        res = open_live(ex, sym, side, entry, sl)   # canlıda gerçek aç + borsa stopu
+                        if res is None:
+                            continue                                 # açma başarısız → atla
+                        entry, _amt_ = res
                         positions[sym] = {"side": side, "entry": entry, "sl": sl,
                                           "target": tgt, "opened": now_utc().isoformat()}
                         save_state(positions)
                         arrow = "🟢 AL" if side == "LONG" else "🔴 SAT"
-                        tb.notify(f"{arrow} <b>[DRY] {sym.split('/')[0]}</b>  {side}\n"
+                        tb.notify(f"{arrow} <b>{TAG}{sym.split('/')[0]}</b>  {side}\n"
                                   f"giriş {entry:.6g}  •  stop {sl:.6g}\n"
                                   f"≈hedef {tgt:.6g} (orta bant)  •  çıkış: RSI toparlayınca (dinamik)\n"
                                   f"sebep: RSI(2) aşırı {'dip' if side=='LONG' else 'tepe'} + Bollinger + trend")
-                        log.info(f"{arrow} [DRY] {sym} {side} giriş {entry:.6g} stop {sl:.6g} ≈hedef {tgt:.6g}")
+                        log.info(f"{arrow} {TAG}{sym} {side} giriş {entry:.6g} stop {sl:.6g} ≈hedef {tgt:.6g}")
 
             _touch_lock()                         # canlıyım heartbeat (ikinci kopyayı engeller)
             open_c = len(positions)
