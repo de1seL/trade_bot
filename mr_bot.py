@@ -45,7 +45,8 @@ LEV            = 5
 TRADE_USDT     = 10          # kağıt pozisyon büyüklüğü (marj)
 MAX_POSITIONS  = 4           # aynı anda max 4 pozisyon
 TOP_N          = 80          # daha çok coin = daha çok işlem, AYNI edge (eşiği gevşetmeden)
-LOOP_SEC       = 60          # 1 dk — strateji 1h mumlu, bundan hızlısı fayda vermez (rate-limit + repaint riski)
+LOOP_SEC       = 15          # 15s — açık poz çıkış kontrolü hızlı; giriş taraması cache'li (rate-limit korumalı)
+SCAN_TTL       = 50          # giriş taramasında 1h mum cache süresi (aynı mumu tekrar çekmez)
 REFRESH_SEC    = 900         # coin listesini 15 dk'da bir yenile
 STATUS_SEC     = 3600         # Telegram'a periyodik özet (WR/PnL) — saatte bir
 MIN_HIST       = 260
@@ -53,6 +54,7 @@ STATE_FILE     = "mr_positions.json"
 TRADES_CSV     = "mr_trades.csv"
 LOCK_FILE      = "mr_bot.lock"
 COST_FR        = tb.CONFIG["commission"] + tb.CONFIG["slippage"]
+SESSION_START  = None        # main()'de ayarlanır → özet her açılışta sıfırlanır (oturum-bazlı)
 
 
 def _lock_alive():
@@ -105,7 +107,8 @@ def log_trade(row):
 
 
 def compute_stats():
-    """mr_trades.csv'den kümülatif özet: n, W/L, WR, PnL$, PF (restart'ta da doğru)."""
+    """Özet: n, W/L, WR, PnL$, PF. SESSION_START ayarlıysa SADECE bu oturumu sayar
+    (her açılışta sıfırlanmış gibi); CSV geçmişi silinmez, sadece filtrelenir."""
     import csv
     if not os.path.isfile(TRADES_CSV):
         return None
@@ -113,6 +116,8 @@ def compute_stats():
     try:
         with open(TRADES_CSV, encoding="utf-8") as f:
             for r in csv.DictReader(f):
+                if SESSION_START and r.get("time", "") < SESSION_START:
+                    continue                        # bu oturumdan önceki işlemleri sayma
                 p = float(r["pnl_usdt"])
                 n += 1; usd += p
                 if p > 0: w += 1; gw += p
@@ -287,6 +292,8 @@ def reconcile(ex, positions):
 
 
 def main():
+    global SESSION_START
+    SESSION_START = now_utc().strftime("%Y-%m-%d %H:%M:%S")   # özet bu andan itibaren sayar
     if _lock_alive():
         log.error("⛔ Başka bir mr_bot ZATEN çalışıyor (mr_bot.lock taze). "
                   "İki kopya aynı anda çalıştırma — istatistiği bozar, riski 2'ye katlar.")
@@ -366,7 +373,8 @@ def main():
                     if sym in positions:
                         continue
                     try:
-                        df = tb.fetch_ohlcv(ex, sym, "1h", limit=MIN_HIST + 20)
+                        # cache'li: 15s döngüde aynı 1h mumu tekrar tekrar çekmez (rate-limit koruması)
+                        df = tb.fetch_ohlcv_cached(ex, sym, "1h", MIN_HIST + 20, SCAN_TTL)
                     except Exception:
                         continue
                     if len(df) < MIN_HIST:
