@@ -41,6 +41,9 @@ tb.CONFIG["min_volatility_pct"] = 1.5
 # tarıyor. rsi_sell = 100 - rsi_buy = 95.
 FROZEN = dict(rsi_buy=5, rsi_sell=95, rsi_exit_l=65, rsi_exit_s=35,
               ema=200, bb_len=20, bb_mult=2.0, atr_stop=3.0, max_hold_h=24)
+# GÜVENLİK: 3×ATR stopu fiyatın bu %'sinden UZAKSA o coine GİRME (BLUAI gibi ultra-volatil
+# micro-cap'lerde stop -%37'ye gidiyordu → -%186 kayıp). Güvenli stop koyulamayan coin = pas.
+MAX_STOP_PCT   = 0.08        # 3×ATR stop mesafesi > %8 ise giriş yok (5x'te max ~-%40/işlem)
 LEV            = 5
 TRADE_USDT     = 10          # kağıt pozisyon büyüklüğü (marj)
 MAX_POSITIONS  = 4           # aynı anda max 4 pozisyon
@@ -156,6 +159,10 @@ def check_entry(df):
     if any(np.isnan(x) for x in (r, e, av, lo_bb.iloc[i], up_bb.iloc[i], mid.iloc[i])):
         return None
     tgt = float(mid.iloc[i])
+    # GÜVENLİK: stop çok genişse (ultra-volatil coin) o coine hiç girme
+    stop_pct = (FROZEN["atr_stop"] * av) / c if c else 1.0
+    if stop_pct > MAX_STOP_PCT:
+        return None
     if c > e and r < FROZEN["rsi_buy"] and c < lo_bb.iloc[i]:
         return "LONG", c, c - FROZEN["atr_stop"] * av, tgt
     if c < e and r > FROZEN["rsi_sell"] and c > up_bb.iloc[i]:
