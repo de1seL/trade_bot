@@ -9,7 +9,7 @@ Sinyalleri ve kağıt-üstü sonuçları Telegram'a yollar + mr_trades.csv'ye ya
 Donmuş strateji (OOS doğrulandı — DEĞİŞTİRME):
   LONG : close>EMA200(1h)  VE  RSI(2)<5  VE  close < Bollinger alt-band
   SHORT: close<EMA200(1h)  VE  RSI(2)>95 VE  close > Bollinger üst-band
-  ÇIKIŞ: RSI(2)>65 (long) / <35 (short)  |  felaket-stop: 3.0×ATR  |  max 24s
+  ÇIKIŞ: RSI(2)>65 (long) / <35 (short)  |  SABİT stop: -%40 kaldıraçlı (5x→%8)  |  max 24s
   Kaldıraç 5x (kağıt), pozisyon başı sabit trade_usdt (kağıt).
 
 Mevcut trade_bot.py'nin ALTYAPISINI kullanır (notify, exchange, fetch, coin seçimi)
@@ -40,10 +40,11 @@ tb.CONFIG["min_volatility_pct"] = 1.5
 # işlem, aynı WR). Sadece volatilde geçerli (likitte çöküyor); mr_bot zaten volatil
 # tarıyor. rsi_sell = 100 - rsi_buy = 95.
 FROZEN = dict(rsi_buy=5, rsi_sell=95, rsi_exit_l=65, rsi_exit_s=35,
-              ema=200, bb_len=20, bb_mult=2.0, atr_stop=3.0, max_hold_h=24)
-# GÜVENLİK: 3×ATR stopu fiyatın bu %'sinden UZAKSA o coine GİRME (BLUAI gibi ultra-volatil
-# micro-cap'lerde stop -%37'ye gidiyordu → -%186 kayıp). Güvenli stop koyulamayan coin = pas.
-MAX_STOP_PCT   = 0.08        # 3×ATR stop mesafesi > %8 ise giriş yok (5x'te max ~-%40/işlem)
+              ema=200, bb_len=20, bb_mult=2.0, max_hold_h=24)
+# SABİT STOP: -%40 kaldıraçlı (fiyatta STOP_ROI/LEV = 0.40/5 = %8). Her işlemde
+# öngörülebilir, üst-sınırlı kayıp. (Eski değişken 3×ATR stop, BLUAI gibi coinlerde
+# -%37'ye gidip -%186 kayba yol açmıştı.)
+STOP_ROI       = 0.40        # sabit stop = -%40 kaldıraçlı (5x → fiyatta %8)
 LEV            = 5
 TRADE_USDT     = 10          # kağıt pozisyon büyüklüğü (marj)
 MAX_POSITIONS  = 4           # aynı anda max 4 pozisyon
@@ -159,14 +160,15 @@ def check_entry(df):
     if any(np.isnan(x) for x in (r, e, av, lo_bb.iloc[i], up_bb.iloc[i], mid.iloc[i])):
         return None
     tgt = float(mid.iloc[i])
-    # GÜVENLİK: stop çok genişse (ultra-volatil coin) o coine hiç girme
-    stop_pct = (FROZEN["atr_stop"] * av) / c if c else 1.0
-    if stop_pct > MAX_STOP_PCT:
+    stop_move = STOP_ROI / LEV                       # sabit stop mesafesi (fiyat kesri) = %8
+    # GÜVENLİK: coin çok volatilse (1 saatlik ATR ≥ stop mesafesi) sabit stop
+    # gap'lenip -%40'tan çok daha kötü dolabilir → o coine hiç girme.
+    if c and (av / c) > stop_move:
         return None
     if c > e and r < FROZEN["rsi_buy"] and c < lo_bb.iloc[i]:
-        return "LONG", c, c - FROZEN["atr_stop"] * av, tgt
+        return "LONG", c, c * (1 - stop_move), tgt
     if c < e and r > FROZEN["rsi_sell"] and c > up_bb.iloc[i]:
-        return "SHORT", c, c + FROZEN["atr_stop"] * av, tgt
+        return "SHORT", c, c * (1 + stop_move), tgt
     return None
 
 
